@@ -1,0 +1,766 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-06-24"
+---
+
+```{r}
+library(terra)
+library(tidyverse)
+library(tidyterra)
+library(stringr)
+library(sf)
+```
+
+
+
+```{r}
+# Load and prepare land polygon for South America
+land_polyg_latam <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
+) |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-118, -33, -55, 32)) |>
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_latam)
+
+
+
+# Load and prepare land polygon for South America
+land_polyg_embs <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(20, 60, 29, 49)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_embs)
+
+
+
+# Load and prepare land polygon for Europe
+land_polyg_eur <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-20, 62, 29, 75)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_eur)
+```
+
+
+```{r}
+# =============================================================================
+# CONFIGURACIÓN INICIAL
+# =============================================================================
+
+# --- OPCIÓN DE RESOLUCIÓN ---
+REDUCIR_RESOLUCION <-  FALSE  # Cambia a FALSE para producción
+FACTOR_AGREGACION <- 60      # Ajusta según necesidad
+```
+
+
+
+
+
+```{r}
+# =============================================================================
+# 1. Definir la conversión PFT (tabla Poulter)
+# =============================================================================
+poulter <- list(
+  "10"  = list(Crop = 0.90, Grass = 0.10),
+  "11"  = list(Crop = 0.90, Grass = 0.10),
+  "12"  = list(Crop = 0.30, Shrub = 0.70),
+  "20"  = list(Crop = 1),
+  "30"  = list(Tree = 0.10, Shrub = 0.15, Grass = 0.60, Crop = 0.15),
+  "40"  = list(Tree = 0.15, Shrub = 0.35, Grass = 0.30, Crop = 0.20),
+  "50"  = list(Tree = 0.90, Shrub = 0.10),
+  "60"  = list(Tree = 0.50, Shrub = 0.20, Grass = 0.30),
+  "61"  = list(Tree = 0.70, Shrub = 0.15, Grass = 0.15),
+  "62"  = list(Tree = 0.30, Shrub = 0.25, Grass = 0.45),
+  "70"  = list(Tree = 0.70, Shrub = 0.15, Grass = 0.15),
+  "71"  = list(Tree = 0.70, Shrub = 0.15, Grass = 0.15),
+  "72"  = list(Tree = 0.30, Shrub = 0.25, Grass = 0.45),
+  "80"  = list(Tree = 0.50, Shrub = 0.20, Grass = 0.30),
+  "81"  = list(Tree = 0.70, Shrub = 0.15, Grass = 0.15),
+  "82"  = list(Tree = 0.30, Shrub = 0.25, Grass = 0.45),
+  "90"  = list(Tree = 0.60, Shrub = 0.15, Grass = 0.25),
+  "100" = list(Tree = 0.40, Shrub = 0.20, Grass = 0.40),
+  "110" = list(Tree = 0.20, Shrub = 0.20, Grass = 0.60),
+  "120" = list(Shrub = 0.60, Grass = 0.40),
+  "121" = list(Shrub = 0.60, Grass = 0.40),
+  "122" = list(Shrub = 0.60, Grass = 0.40),
+  "130" = list(Grass = 1),
+  "140" = list(Grass = 1),
+  "150" = list(Tree = 0.10, Shrub = 0.10, Grass = 0.30, NonVegetated = 0.50),
+  "152" = list(Shrub = 0.20, Grass = 0.30, NonVegetated = 0.50),
+  "153" = list(Grass = 0.50, NonVegetated = 0.50),
+  "160" = list(Tree = 0.75, Grass = 0.25),
+  "170" = list(Tree = 0.75, Shrub = 0.25),
+  "180" = list(Shrub = 0.40, Grass = 0.60),
+  "190" = list(NonVegetated = 1),
+  "200" = list(NonVegetated = 1),
+  "201" = list(NonVegetated = 1),
+  "202" = list(NonVegetated = 1),
+  "210" = list(NonVegetated = 1),
+  "220" = list(NonVegetated = 1)
+)
+```
+
+
+
+
+```{r}
+# =============================================================================
+# 2. Preparar lookups y clases válidas (SOLO para Tree)
+# =============================================================================
+valid_classes <- as.integer(names(poulter))
+
+pft_names <- c("Tree")  # <--- SOLO Tree
+
+# Inicializar lookups SOLO para Tree
+lookups <- setNames(lapply(pft_names, function(p) rep(0, 256)), pft_names)
+
+get_frac <- function(lst, key) if (key %in% names(lst)) lst[[key]] else 0
+
+for (lc_class in names(poulter)) {
+  idx <- as.integer(lc_class) + 1
+  frac_list <- poulter[[lc_class]]
+  for (pft in pft_names) {
+    lookups[[pft]][idx] <- get_frac(frac_list, pft)
+  }
+}
+
+# Verificar que Tree tenga valores > 0 en las clases correctas
+cat("Clases con Tree > 0:\n")
+tree_classes <- which(lookups[["Tree"]] > 0) - 1  # -1 porque R es 1-indexed
+print(tree_classes)
+
+```
+
+
+```{r}
+# =============================================================================
+# 3. Función de reclasificación (SOLO Tree)
+# =============================================================================
+reclassify_pft <- function(raster_obj, lookup, valid_classes) {
+  from_to <- cbind(valid_classes, lookup[valid_classes + 1])
+  classify(raster_obj, rcl = from_to, others = NA)
+}
+```
+
+
+
+# =============================================================================
+# 4. Función para reducir resolución
+# =============================================================================
+```{r}
+# Definir función modal si no existe
+if (!exists("modal")) {
+  modal <- function(x) {
+    ux <- unique(x)
+    ux[which.max(tabulate(match(x, ux)))]
+  }
+}
+
+
+# =============================================================================
+# 4. Función para reducir resolución
+# =============================================================================
+agregar_raster <- function(raster_obj, factor, fun = "modal") {
+  aggregate(raster_obj, fact = factor, fun = modal, na.rm = TRUE)
+}
+
+```
+
+
+
+
+
+
+```{r}
+# =============================================================================
+# 5. Lista de archivos para LATAM y EUROPE (1992-2015)
+# =============================================================================
+
+# --- LATAM files ---
+esa_files_latam <- list.files(
+  path = "C:/Copernicus_Land_Cover/LATAM_LCCS_1992_to_2022/",
+  pattern = "\\.nc$",
+  full.names = TRUE)
+
+# Seleccionar años 1992-2015
+#esa_files_latam <- esa_files_latam[grepl("-(199[2-9]|200[0-9]|201[0-5])-", esa_files_latam)]
+esa_files_latam <- esa_files_latam[grepl("-(199[2-9]|200[0-9]|201[0-9]|202[0-2])-", esa_files_latam)]
+
+# --- EUROPE files ---
+esa_files_europe <- list.files(
+  path = "C:/Copernicus_Land_Cover/EUROPE_LCCS_1992_to_2022/",  # Ajusta esta ruta
+  pattern = "\\.nc$",
+  full.names = TRUE)
+
+# Seleccionar años 1992-2015
+#esa_files_europe <- esa_files_europe[grepl("-(199[2-9]|200[0-9]|201[0-5])-", esa_files_europe)]
+esa_files_europe <- esa_files_europe[grepl("-(199[2-9]|200[0-9]|201[0-9]|202[0-2])-", esa_files_europe)]
+
+# --- Combinar ambas listas con identificador de región ---
+esa_files_combined <- list(LATAM = esa_files_latam, EUROPE = esa_files_europe)
+  
+
+# Mostrar resumen
+cat("  LATAM:", length(esa_files_latam), "archivos\n")
+cat("  EUROPE:", length(esa_files_europe), "archivos\n")
+
+# Mostrar primeros archivos de cada región
+cat("\n📄 Ejemplos LATAM:\n")
+print(head(basename(esa_files_latam), 2))
+cat("\n📄 Ejemplos EUROPE:\n")
+print(head(basename(esa_files_europe), 2))
+```
+
+
+```{r}
+# =============================================================================
+# 6. PROCESAR AÑOS (SOLO Tree) - PARA TODAS LAS REGIONES
+# =============================================================================
+
+# Lista para almacenar resultados por región
+results <- list()
+
+for (region in names(esa_files_combined)) {
+  cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+  cat("📍 PROCESANDO REGIÓN:", region, "\n")
+  cat(paste(rep("=", 60), collapse = ""), "\n")
+  
+  files <- esa_files_combined[[region]]
+  n_years <- length(files)
+  
+  cat("📊 Procesando", n_years, "años para", region, "...\n")
+  
+  # Inicializar acumulador SOLO para Tree
+  sum_tree <- NULL
+  
+  for (i in seq_along(files)) {
+    year <- as.numeric(str_extract(basename(files[i]), "\\d{4}"))
+    cat("\n  📅 Procesando año", year, "...\n")
+    
+    # Leer raster
+    r <- rast(files[i], subds = "lccs_class")
+    
+    cat("     Resolución original:", res(r)[1], "° x", res(r)[2], "°\n")
+    cat("     Dimensiones originales:", nrow(r), "x", ncol(r), "\n")
+    
+    # Reducir resolución si está activado
+    if (REDUCIR_RESOLUCION) {
+      cat("     🔽 Reduciendo resolución (factor =", FACTOR_AGREGACION, ")...\n")
+      r <- agregar_raster(r, FACTOR_AGREGACION, fun = "modal")
+      cat("     Resolución agregada:", res(r)[1], "° x", res(r)[2], "°\n")
+      cat("     Dimensiones agregadas:", nrow(r), "x", ncol(r), "\n")
+    } else {
+      cat("     ✅ Usando resolución original\n")
+    }
+    
+    # Reclasificar a Tree PFT
+    cat("     Extrayendo fracción de Tree...\n")
+    tree_i <- reclassify_pft(r, lookups[["Tree"]], valid_classes)
+    
+    # Acumular
+    if (is.null(sum_tree)) {
+      sum_tree <- tree_i
+    } else {
+      sum_tree <- sum_tree + tree_i
+    }
+    
+    rm(r, tree_i)
+    gc()
+  }
+  
+  # Guardar el acumulador para esta región
+  results[[region]] <- list(
+    sum_tree = sum_tree,
+    n_years = n_years
+  )
+}
+
+```
+
+
+
+
+```{r}
+# =============================================================================
+# 8. Calcular promedio de Tree para cada región
+# =============================================================================
+
+for (region in names(results)) {
+  cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+  cat("📊 Calculando promedio de Tree para:", region, "\n")
+  cat(paste(rep("=", 60), collapse = ""), "\n")
+  
+  sum_tree <- results[[region]]$sum_tree
+  n_years <- results[[region]]$n_years
+  
+  tree_mean <- sum_tree / n_years
+  names(tree_mean) <- "Tree"
+  
+  # Guardar en la lista de resultados
+  results[[region]]$tree_mean <- tree_mean
+  
+  # =============================================================================
+  # 9. VERIFICACIÓN
+  # =============================================================================
+  cat(paste0("\n", paste(rep("=", 60), collapse = ""), "\n"))
+  cat("✅ VERIFICACIÓN DE RESULTADOS -", region, "\n")
+  cat(strrep("=", 60), "\n\n")
+  
+  # Estadísticas de Tree
+  mean_val <- global(tree_mean, "mean", na.rm = TRUE)
+  min_val <- global(tree_mean, "min", na.rm = TRUE)
+  max_val <- global(tree_mean, "max", na.rm = TRUE)
+  na_count <- global(tree_mean, fun = function(x) sum(is.na(x)))
+  
+  cat("🌳 Tree PFT (1992-2022 promedio) -", region, ":\n")
+  cat("   Media:", round(mean_val[,1], 6), "\n")
+  cat("   Mínimo:", round(min_val[,1], 6), "\n")
+  cat("   Máximo:", round(max_val[,1], 6), "\n")
+  cat("   NAs:", na_count[,1], "\n")
+  
+  # =============================================================================
+  # 10. VISUALIZAR
+  # =============================================================================
+  plot(tree_mean, 
+       main = paste("Tree frac. (1992-2022 / 300m resol) -", region),
+       col = hcl.colors(100, "Greens", rev = TRUE))
+}
+
+```
+
+
+```{r}
+# =============================================================================
+# 11. GUARDAR RESULTADOS POR REGIÓN
+# =============================================================================
+
+for (region in names(results)) {
+  tree_mean <- results[[region]]$tree_mean
+  
+  # Save with all metadata
+  output_file <- paste0("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_mean_1992_2022_300m_", tolower(region), ".tif")
+  
+  writeRaster(tree_mean, output_file, 
+              overwrite = TRUE,
+              filetype = "GTiff",
+              gdal = c("COMPRESS=NONE", "BIGTIFF=YES"))
+  
+  cat("💾 Guardado:", output_file, "\n")
+}
+
+```
+
+
+
+```{r}
+# =============================================================================
+# 12. CARGAR Y VISUALIZAR RESULTADOS GUARDADOS
+# =============================================================================
+
+tree_mean_latam <- terra::rast("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_mean_1992_2022_300m_latam.tif")
+
+tree_mean_europe <- terra::rast("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_mean_1992_2022_300m_europe.tif")
+
+
+#terra::plot(tree_mean_latam, 
+             # main = "Tree frac. (1992-2022 / 300m resol) LATAM",
+             # col = hcl.colors(100, "Greens", rev = TRUE))
+
+
+#terra::plot(tree_mean_europe, 
+             # main = "Tree frac. (1992-2022 / 300m resol) EUR-EMBS",
+              #col = hcl.colors(100, "Greens", rev = TRUE))
+
+
+
+terra::plot(tree_mean_europe,
+  main = "Tree frac. (1992–2022 / 300 m resol.) EUR-EMBS",
+  col = hcl.colors(11, "ag_Sunset", rev = TRUE))
+
+terra::plot(tree_mean_latam, 
+              main = "Tree frac. (1992-2022 / 300m resol) LATAM",
+              col = hcl.colors(11, "ag_Sunset", rev = TRUE))
+  
+```
+
+
+
+
+# =============================================================================
+# EXTRAER TREE PFT EN PUNTOS DE MUESTREO
+# =============================================================================
+```{r}
+modern_pollen_latam <- readRDS("H:/Mi unidad/Research/Final_LATAM_climate_reconstruction/Input_for_reconstruction/updated_modern_dataset_climate_hill.rds")
+
+head(modern_pollen_latam)
+
+modern_pollen_smpds <- read.csv("G:/Mi unidad/Research/Tree_cover_LATAM_EMBSECBIO/Data/Input/Modern_Pollen_TrIan_from_climate_recon_EMBSECBIO.csv") |> 
+  rename(latitude  = Lat, longitude=Long, entity_name = Entity.name) |>
+  filter(longitude <= 62,
+         latitude <= 75) |>
+  mutate(id_sample = paste0(X, "_", entity_name, sep="")) |>
+  select(-X) |>
+  select(id_sample, everything())
+
+head(modern_pollen_smpds)
+
+```
+
+
+
+Cómo se describe en palabras:
+“Una secuencia geométrica con razón 2”
+“Una progresión exponencial de base 2”
+“Valores que se duplican en cada paso empezando en 0.75”
+```{r}
+# =============================================================================
+# 1. DEFINIR TAMAÑOS DE BUFFER
+# =============================================================================
+buffer_sizes_km <- 0.75 * 2^(0:5)
+names(buffer_sizes_km) <- paste0("buffer_", buffer_sizes_km)
+
+cat("📏 Tamaños de buffer a utilizar:\n")
+print(buffer_sizes_km)
+
+# Convertir km a metros (st_buffer usa metros cuando el CRS es proyectado)
+buffer_sizes_m <- buffer_sizes_km * 1000
+```
+
+# =============================================================================
+# 2. FUNCIÓN PARA EXTRAER VALORES
+# =============================================================================
+```{r}
+
+extract_tree_values_km <- function(raster_file, points_df, buffer_sizes_m) {
+  
+  # Cargar raster
+  cat("\n📂 Cargando raster:", basename(raster_file), "\n")
+  tree_raster <- rast(raster_file)
+  
+  # Crear objeto sf desde points_df en WGS84
+  points_sf <- st_as_sf(points_df, coords = c("longitude", "latitude"), crs = 4326)
+  
+  # ===== EXTRACCIÓN EN PUNTO EXACTO =====
+  cat("📍 Extrayendo valor en punto exacto...\n")
+  point_values <- terra::extract(tree_raster, points_sf, ID = FALSE)
+  colnames(point_values) <- "Tree_Point"
+  
+  # Mostrar estadísticas rápidas del punto
+  cat("   ✅ Extracción puntual completada\n")
+  cat("   📊 Estadísticas del punto exacto:\n")
+  cat("      Media:", round(mean(point_values$Tree_Point, na.rm = TRUE), 4), "\n")
+  cat("      Min:", round(min(point_values$Tree_Point, na.rm = TRUE), 4), "\n")
+  cat("      Max:", round(max(point_values$Tree_Point, na.rm = TRUE), 4), "\n")
+  cat("      NAs:", sum(is.na(point_values$Tree_Point)), "\n")
+  
+  # Inicializar lista de resultados con el punto
+  results <- list(
+    Tree_Point = point_values$Tree_Point
+  )
+  
+  # ===== EXTRACCIÓN CON BUFFERS =====
+  cat("\n🔄 Extrayendo valores con buffers circulares (en km)...\n")
+  
+  # Proyectar puntos a CRS en metros UNA SOLA VEZ (optimización)
+  cat("   Preparando proyección de puntos...\n")
+  points_proj <- st_transform(points_sf, crs = "+proj=eqc +lon_0=0 +lat_ts=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m")
+  
+  for (i in seq_along(buffer_sizes_m)) {
+    buf_size_m <- buffer_sizes_m[i]
+    buf_size_km <- buf_size_m / 1000
+    buf_name <- paste0("Tree_Buffer_", buf_size_km, "km")
+    
+    cat("   📍 Buffer:", buf_size_km, "km...")
+    
+    # Crear buffers circulares en metros
+    buffers_sf <- st_buffer(points_proj, dist = buf_size_m)
+    
+    # Transformar de vuelta a WGS84 para extraer del raster
+    buffers_sf <- st_transform(buffers_sf, crs = 4326)
+    
+    # Extraer valores (media de Tree fraction dentro del buffer)
+    buffer_values <- terra::extract(tree_raster, buffers_sf, 
+                                    fun = mean, na.rm = TRUE, ID = FALSE)
+    colnames(buffer_values) <- buf_name
+    
+    # Guardar resultados
+    results[[buf_name]] <- buffer_values[,1]
+    
+    # Mostrar estadísticas rápidas
+    cat(" ✅ Completado\n")
+    cat("      Media:", round(mean(buffer_values[,1], na.rm = TRUE), 4), "\n")
+    cat("      NAs:", sum(is.na(buffer_values[,1])), "\n")
+  }
+  
+  # Combinar todos los resultados en un data.frame
+  result_df <- as.data.frame(results)
+  
+  # Agregar información de coordenadas y metadata
+  result_df <- cbind(
+    id_sample = points_df$id_sample,
+    entity_name = points_df$entity_name,
+    latitude = points_df$latitude,
+    longitude = points_df$longitude,
+    result_df
+  )
+  
+  cat("\n✅ Extracción completada para todos los puntos y buffers\n")
+  
+  return(result_df)
+}
+```
+
+
+
+# =============================================================================
+# 3. EXTRAER PARA LATAM
+# =============================================================================
+```{r}
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("🌎 EXTRACCIÓN PARA LATAM\n")
+
+raster_latam <- "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_mean_1992_2022_300m_europe.tif"
+
+if (file.exists(raster_latam)) {
+  
+  latam_extraction <- extract_tree_values_km(
+    raster_file = raster_latam,
+    points_df = modern_pollen_latam,
+    buffer_sizes_m = buffer_sizes_m
+  )
+  
+  cat("\n📊 Resumen LATAM:\n")
+  cat("   Puntos procesados:", nrow(latam_extraction), "\n")
+  cat("   Columnas extraídas:", ncol(latam_extraction), "\n")
+  cat("   Columnas:", paste(colnames(latam_extraction), collapse = ", "), "\n")
+  
+  # Guardar resultados
+  saveRDS(latam_extraction, "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_km.rds")
+  
+} else {
+  cat("❌ Archivo no encontrado:", raster_latam, "\n")
+}
+
+```
+
+
+
+# =============================================================================
+# 4. EXTRAER PARA EUROPE
+# =============================================================================
+```{r}
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("🌍 EXTRACCIÓN PARA EUROPE\n")
+cat(paste(rep("=", 80), collapse = ""), "\n")
+
+raster_europe <- "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_mean_1992_2022_300m_europe.tif"
+
+if (file.exists(raster_europe)) {
+  
+  europe_extraction <- extract_tree_values_km(
+    raster_file = raster_europe,
+    points_df = modern_pollen_smpds,
+    buffer_sizes_m = buffer_sizes_m
+  )
+  
+  cat("\n📊 Resumen final extracción EUROPE:\n")
+  cat("   Puntos procesados:", nrow(europe_extraction), "\n")
+  cat("   Columnas extraídas:", ncol(europe_extraction), "\n")
+  
+  # Guardar resultados
+  saveRDS(europe_extraction, "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_europe_km.rds")
+  
+} else {
+  cat("❌ Archivo no encontrado:", raster_europe, "\n")
+}
+
+```
+
+
+
+```{r}
+europe_extraction <- readRDS("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_europe_km.rds")
+
+latam_extraction <- readRDS("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_km.rds")
+```
+
+
+
+```{r}
+plot1 <- ggplot() +
+  geom_sf(data = land_polyg_latam, fill = "grey75", color = "grey50") +
+  geom_point(
+    data = latam_extraction,
+    aes(x = longitude, y = latitude, color = Tree_Buffer_0.75km), size = 1.5) +
+  scale_color_gradientn(colours = hcl.colors(11, "ag_Sunset", rev = T)) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL) +
+  theme_bw()
+
+plot1
+
+
+plot2 <- ggplot() +
+  geom_sf(data = land_polyg_eur, fill = "grey75", color = "grey50") +
+  geom_point(
+    data = europe_extraction,
+    aes(x = longitude, y = latitude, color = Tree_Buffer_0.75km), size = 1.5) +
+  scale_color_gradientn(colours = hcl.colors(11, "ag_Sunset", rev = T)) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL) +
+  theme_bw()
+
+plot2
+```
+
+
+
+
+
+Visualizacion
+```{r}
+# =============================================================================
+# 3. RELACIÓN ENTRE TAMAÑO DE BUFFER Y MEDIA
+# =============================================================================
+# Seleccionar columnas de Tree
+tree_cols <- grep("Tree", colnames(europe_extraction), value = TRUE)
+
+# Preparar datos para visualización
+europe_long <- europe_extraction %>%
+  select(all_of(tree_cols)) %>%
+  pivot_longer(cols = everything(), 
+               names_to = "Extraction_Type", 
+               values_to = "Tree_Fraction")
+
+# Extraer el tamaño del buffer de los nombres
+europe_long <- europe_long %>%
+  mutate(
+    Buffer_Size = case_when(
+      Extraction_Type == "Tree_Point" ~ "Punto",
+      TRUE ~ gsub("Tree_Buffer_", "", Extraction_Type)
+    ),
+    Buffer_Size = factor(Buffer_Size, 
+                         levels = c("Punto", "0.75km", "1.5km", "3km", "6km", "12km", "24km")))
+
+
+# Calcular medias por buffer
+buffer_means <- europe_long %>%
+  filter(Buffer_Size != "Punto") %>%
+  group_by(Buffer_Size) %>%
+  summarise(
+    Mean = mean(Tree_Fraction, na.rm = TRUE),
+    SD = sd(Tree_Fraction, na.rm = TRUE)
+  ) %>%
+  mutate(
+    Buffer_Size_Num = as.numeric(gsub("km", "", Buffer_Size))
+  )
+
+print(buffer_means)
+
+# Gráfico de media vs buffer size
+p3 <- ggplot(buffer_means, aes(x = Buffer_Size_Num, y = Mean)) +
+  geom_point(size = 3, color = "blue") +
+  geom_errorbar(aes(ymin = Mean - SD, ymax = Mean + SD), width = 0.5) +
+  geom_line(group = 1, linetype = "dashed", color = "gray50") +
+  labs(title = "Tree Fraction promedio vs tamaño de buffer",
+       x = "Tamaño de buffer (km)", y = "Media de Tree Fraction") +
+  theme_minimal()
+
+print(p3)
+```
+
+
+
+
+
+
+
+
+
+```{r}
+# =============================================================================
+# 9. VISUALIZACIÓN
+# =============================================================================
+
+# Preparar datos para visualización
+buffer_long <- resultados_tree_buffer %>%
+  select(id_sample, latitude, longitude, starts_with("Tree_PFT")) %>%
+  pivot_longer(
+    cols = starts_with("Tree_PFT"),
+    names_to = "buffer",
+    values_to = "Tree_PFT"
+  ) %>%
+  mutate(
+    buffer_km = as.numeric(str_extract(buffer, "\\d+"))
+  )
+
+# Boxplot por buffer
+ggplot(buffer_long, aes(x = factor(buffer_km), y = Tree_PFT)) +
+  geom_boxplot(fill = "darkgreen", alpha = 0.6, color = "darkgreen") +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 4, color = "red") +
+  labs(
+    title = "Tree frac. by buffer size (1992-2015)",
+    x = "Buffer size (km)",
+    y = "Tree frac."
+  ) +
+  theme_minimal()
+
+# Mapa con puntos coloreados por Tree PFT (buffer 6 km)
+ggplot() +
+  geom_sf(data = land_polyg, fill = "white") +
+  geom_point(
+    data = resultados_tree_buffer,
+    aes(longitude, latitude, fill = Tree_PFT_6km),
+    size = 1.8,
+    shape = 21
+  ) +
+  jcolors::scale_fill_jcolors_contin(palette = "pal2") +
+  labs(
+    title = "Tree PFT (buffer 6 km, 1992-2015)",
+    x = "Longitud", y = "Latitud",
+    fill = "Tree fraction"
+  ) +
+  coord_sf() +
+  theme_minimal()
+
+ggplot() +
+  geom_sf(data = land_polyg, fill = "white") +
+  geom_point(
+    data = resultados_tree_buffer,
+    aes(longitude, latitude, fill = Tree_PFT_12km),
+    size = 1.8,
+    shape = 21
+  ) +
+  jcolors::scale_fill_jcolors_contin(palette = "pal2") +
+  labs(
+    title = "Tree PFT (buffer 12 km, 1992-2015)",
+    x = "Longitud", y = "Latitud",
+    fill = "Tree fraction"
+  ) +
+  coord_sf() +
+  theme_minimal()
+```
+
+
+```{r}
+saveRDS(resultados_tree_buffer, "Output_data/Tree_PFT_1992_2015_buffers.rds")
+
+
+cat("\n💾 Resultados guardados en: Tree_PFT_1992_2015_buffers.rds\n")
+
+```
+
