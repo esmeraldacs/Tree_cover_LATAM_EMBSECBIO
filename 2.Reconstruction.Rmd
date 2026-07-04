@@ -1,0 +1,333 @@
+---
+title: "Reconstruction"
+output: html_document
+date: "2026-07-01"
+---
+
+```{r}
+#You can install the released version of fxTWAPLS from CRAN with:
+#install.packages("fxTWAPLS")
+library(tidyverse)
+```
+
+
+
+
+```{r}
+iteration <- "i1" 
+my_path <-"Data/Processed/Output_calibration_and_reconstruction/"
+```
+
+
+Import the dataset of the pollen percentages with the values of tree cover using different buffers
+```{r}
+#Data in proportions or percentages
+europe_extraction <- readRDS("Data/Input/EUROP_tree_extraction_and_pollen_modern.rds") |>
+  filter(Tree_Buffer_24km > 0)
+
+set.seed(9751)
+europe_extraction <- sample_n(europe_extraction, size = 500)
+
+#Data in raw values
+latam_extraction <- readRDS("Data/Input/LATAM_tree_extraction_and_pollen_modern.rds") |>
+  filter(Tree_Buffer_24km > 0)
+
+set.seed(9751)
+latam_extraction <- sample_n(latam_extraction, size = 500)
+```
+
+
+
+LATAM pivot longer for extracting head and tail and also for 
+```{r}
+modern_latam <- latam_extraction |>
+  pivot_longer(cols = -c(id_sample:Tree_Buffer_24km),names_to = "taxa") |>
+  filter(value > 0)
+
+#Extract head and tail of the alphabetically ordered taxa
+#modern_taxa_head_latam <- modern_latam |> dplyr::select(taxa) |> distinct() |> arrange(taxa) |> slice_head() |> pull()
+
+#modern_taxa_tail_latam <- modern_latam |> dplyr::select(taxa) |> distinct() |> arrange(taxa) |> slice_tail() |> pull()
+
+
+#Aux for removing taxa that do not occur in at least 10 samples
+aux2 <- modern_latam |>
+  group_by(taxa) |>
+  mutate(count_taxa = n()) |>
+  ungroup() |>
+  filter(count_taxa >= 10) |>
+  dplyr::select(-count_taxa)
+
+
+modern_latam <- aux2 |>
+  group_by(id_sample) |>
+  mutate(value = value / sum(value)) |>
+  ungroup() |>
+  arrange(taxa) |>
+  pivot_wider(id_cols = c(id_sample:Tree_Buffer_24km), names_from = "taxa",values_fill = 0) |>
+  dplyr::select(-c(id_sample, entity_name, Tree_Point, Tree_Buffer_0.75km, 
+                   Tree_Buffer_1.5km, Tree_Buffer_6km,Tree_Buffer_12km, Tree_Buffer_3km)) |>
+  #dplyr::group_by(latitude,longitude) |> 
+ # dplyr::summarise_all(mean) |>
+ # dplyr::ungroup() |>
+  dplyr::mutate(id_sample = paste0("ID_",dplyr::row_number())) |>
+  dplyr::select(id_sample,everything())
+```
+
+
+EUROPE preparing 
+```{r}
+#Extract head and tail of the alphabetically ordered taxa
+#modern_taxa_head_europe <- europe_extraction |> select(-c(id_sample:Tree_Buffer_24km)) |> names() |> first()
+
+#modern_taxa_tail_europe <- europe_extraction |> select(-c(id_sample:Tree_Buffer_24km)) |> names() |> last()
+
+#Para el dataset de Europa no es necesario quitar los taxa que ocurren en menos de 10 muestras porque ya se quitaron. Tambien estan calculadas en 
+
+modern_europe <- europe_extraction |>
+  dplyr::select(-c(id_sample, entity_name, Tree_Point, Tree_Buffer_0.75km, 
+                   Tree_Buffer_1.5km, Tree_Buffer_6km,Tree_Buffer_12km, Tree_Buffer_3km)) |>
+  dplyr::group_by(latitude,longitude) |> 
+  dplyr::summarise_all(mean) |>
+  dplyr::ungroup() |>
+  na.omit() |>  # Elimina filas con cualquier NA
+  dplyr::mutate(id_sample = paste0("ID_",dplyr::row_number())) |>
+  dplyr::select(id_sample,everything())
+```
+
+
+```{r}
+taxa_latam <- modern_latam |>
+  select(-id_sample, -latitude, -longitude, -elevation, -hill_n2, -Tree_Buffer_24km)
+
+
+taxa_europe <- modern_europe |>
+  select(-id_sample, -latitude, -longitude, -elevation, -hill_n2, -Tree_Buffer_24km)
+```
+
+
+```{r}
+#MTWA
+fit_tf_tree_latam <- fxTWAPLS::TWAPLS.w2(taxa_latam, modern_latam$Tree_Buffer_24km, nPLS = 5, usefx = TRUE, fx_method="pspline",bin=0.08)
+
+fit_tf_tree_europe <- fxTWAPLS::TWAPLS.w2(taxa_europe, modern_europe$Tree_Buffer_24km, nPLS = 5, usefx = TRUE, fx_method="pspline",bin=0.05)
+
+```
+
+
+
+
+```{r}
+CPUS<-8
+
+# Get the location information of each sample
+point_europe <- modern_europe[, c("longitude", "latitude")]
+# Get the distance between each point
+dist_europe <- fxTWAPLS::get_distance(point_europe, cpus = CPUS)
+
+
+
+# Get the location information of each sample
+point_latam <- modern_latam[, c("longitude", "latitude")]
+# Get the distance between each point
+dist_latam <- fxTWAPLS::get_distance(point_latam, cpus = CPUS)
+
+
+```
+
+
+
+```{r}
+# Get the pseudo sites (which are both geographically close and climatically
+# close to the test site) which should be removed in cross validation
+pseudo_tree_latam <- fxTWAPLS::get_pseudo(dist_latam, modern_latam$Tree_Buffer_24km, cpus = CPUS)
+
+pseudo_tree_europe <- fxTWAPLS::get_pseudo(dist_europe, modern_europe$Tree_Buffer_24km, cpus = CPUS)
+```
+
+
+```{r}
+# Leave-out cross validation
+`%>%` <- magrittr::`%>%`
+if(!require(foreach)){install.packages("foreach");library(foreach)}
+
+cv_tf2_tree_latam_pspline <- fxTWAPLS::cv.pr.w(taxa_latam,
+                                         modern_latam$Tree_Buffer_24km,
+                                         nPLS = 5,
+                                         fxTWAPLS::TWAPLS.w2,
+                                         fxTWAPLS::TWAPLS.predict.w,
+                                         pseudo_tree_latam,
+                                         usefx = TRUE,
+                                         fx_method = "pspline",
+                                         bin = 0.08,
+                                         cpus = CPUS,
+                                         test_mode = FALSE)  %>% fxTWAPLS::pb()  
+
+#write.csv(cv_tf2_tree_latam_pspline, paste0(my_path,"cv_tf2_tree_latam_pspline_hill_", iteration,".csv"))
+
+#cv_tf2_mat_pspline <- read.csv("H:/Mi unidad/Research/New_tropical_climate/Output_data/cv_tf2_mat_pspline_hill_21.0.csv")
+
+
+
+
+
+cv_tf2_tree_europe_pspline <- fxTWAPLS::cv.pr.w(taxa_europe,
+                                         modern_europe$Tree_Buffer_24km,
+                                         nPLS = 5,
+                                         fxTWAPLS::TWAPLS.w2,
+                                         fxTWAPLS::TWAPLS.predict.w,
+                                         pseudo_tree_europe,
+                                         usefx = TRUE,
+                                         fx_method = "pspline",
+                                         bin = 0.05,
+                                         cpus = CPUS,
+                                         test_mode = FALSE)  %>% fxTWAPLS::pb()  
+
+#write.csv(cv_tf2_tree_europe_pspline, paste0(my_path,"cv_tf2_tree_europe_pspline_hill_", iteration,".csv"))
+
+#cv_tf2_mat_pspline <- read.csv("H:/Mi unidad/Research/New_tropical_climate/Output_data/cv_tf2_mat_pspline_hill_21.0.csv")
+```
+
+
+```{r}
+# Random t test to the cross validation result
+rand_tf2_tree_latam_pspline <- fxTWAPLS::rand.t.test.w(cv_tf2_tree_latam_pspline, n.perm = 999) |> 
+  as_tibble() |> mutate(variable = "tree", n_comp=row_number())
+
+# Random t test to the cross validation result
+rand_tf2_tree_europe_pspline <- fxTWAPLS::rand.t.test.w(cv_tf2_tree_europe_pspline, n.perm = 999) |> 
+  as_tibble() |> mutate(variable = "tree", n_comp=row_number())
+```
+
+
+```{r}
+rand_tf2_pspline_latam <- rand_tf2_tree_latam_pspline |> dplyr::select(variable,n_comp,everything())
+
+
+#write.csv(rand_tf2_pspline_latam, paste0(my_path,"rand_tf2_pspline_latam_", iteration,".csv"))
+
+
+
+rand_tf2_pspline_europe <- rand_tf2_tree_europe_pspline |> dplyr::select(variable,n_comp,everything())
+
+
+#write.csv(rand_tf2_pspline_europe, paste0(my_path,"rand_tf2_pspline_europe_", iteration,".csv"))
+```
+
+
+
+```{r}
+# Filtrar el mejor componente para cada variable (ej. mtco)
+best_comps_europe <- rand_tf2_pspline_europe %>%
+#  group_by(variable) %>%
+  filter(p < 0.01) %>%        # Solo componentes significativos
+  slice_min(RMSEP) %>%        # Seleccionar el de menor error
+  ungroup()
+
+# Filtrar el mejor componente para cada variable (ej. mtco)
+best_comps_latam <- rand_tf2_pspline_latam %>%
+#  group_by(variable) %>%
+  filter(p < 0.01) %>%        # Solo componentes significativos
+  slice_min(RMSEP) %>%        # Seleccionar el de menor error
+  ungroup()
+
+
+# Extraer predicciones para mtco (ejemplo con componente 2)
+best_comp_tree_latam <- best_comps_latam %>% pull(n_comp)
+
+
+# Extraer predicciones para mtco (ejemplo con componente 2)
+best_comp_tree_europe <- best_comps_europe %>% pull(n_comp)
+```
+
+
+
+```{r}
+# Crear dataframe con observados vs. predichos
+ob_pred_tree_europe <- data.frame(
+  Observed = cv_tf2_tree_europe_pspline$test.x ,
+  Predicted = cv_tf2_tree_europe_pspline[[paste0("comp", best_comp_tree_europe)]]) |>
+  mutate(variable = "tree")
+
+# Crear dataframe con observados vs. predichos
+ob_pred_tree_latam <- data.frame(
+  Observed = cv_tf2_tree_latam_pspline$test.x ,
+  Predicted = cv_tf2_tree_latam_pspline[[paste0("comp", best_comp_tree_latam)]]) |>
+  mutate(variable = "tree")
+```
+
+
+
+
+
+```{r}
+# 1. Crear gráficos individuales para cada variable
+ggplot(ob_pred_tree_latam, aes(x = Observed, y = Predicted)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linewidth = 0.5) +
+  coord_fixed(ratio = 1) +  # Cuadrado perfecto
+  labs(title = "Latam") +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+
+# 1. Crear gráficos individuales para cada variable
+ggplot(ob_pred_tree_europe, aes(x = Observed, y = Predicted)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linewidth = 0.5) +
+  coord_fixed(ratio = 1) +  # Cuadrado perfecto
+  labs(title = "Europe") +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+```
+
+
+
+```{r}
+# Después de generar ob_pred_tree_europe y ob_pred_tree_latam
+ob_pred_tree_europe2 <- ob_pred_tree_europe %>%
+  mutate(Predicted_clipped = pmax(0, pmin(1, Predicted)),
+         Residual_clipped = Observed - Predicted_clipped)
+
+ob_pred_tree_latam2 <- ob_pred_tree_latam %>%
+  mutate(Predicted_clipped = pmax(0, pmin(1, Predicted)),
+         Residual_clipped = Observed - Predicted_clipped)
+
+
+# 1. Crear gráficos individuales para cada variable
+ggplot(ob_pred_tree_latam2, aes(x = Observed, y = Predicted)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linewidth = 0.5) +
+  coord_fixed(ratio = 1) +  # Cuadrado perfecto
+  labs(title = "alpha") +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+
+# 1. Crear gráficos individuales para cada variable
+ggplot(ob_pred_tree_europe2, aes(x = Observed, y = Predicted)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linewidth = 0.5) +
+  coord_fixed(ratio = 1) +  # Cuadrado perfecto
+  labs(title = "tree") +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+```
+
+
+
+```{r}
+ob_pred_tree_europe
+```
+
+
+
+
+
+
+
