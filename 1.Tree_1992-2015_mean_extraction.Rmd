@@ -404,8 +404,8 @@ modern_pollen_latam <- readRDS("H:/Mi unidad/Research/Final_LATAM_climate_recons
 
 head(modern_pollen_latam)
 
-modern_pollen_smpds <- read.csv("G:/Mi unidad/Research/Tree_cover_LATAM_EMBSECBIO/Data/Input/Modern_Pollen_TrIan_from_climate_recon_EMBSECBIO.csv") |> 
-  rename(latitude  = Lat, longitude=Long, entity_name = Entity.name) |>
+modern_pollen_smpds <- read.csv("C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Input/Modern_Pollen_TrIan_from_climate_recon_EMBSECBIO.csv") |> 
+  rename(latitude  = Lat, longitude=Long, entity_name = Entity.name, elevation = Elv) |>
   filter(longitude <= 62,
          latitude <= 75) |>
   mutate(id_sample = paste0(X, "_", entity_name, sep="")) |>
@@ -426,7 +426,7 @@ Cómo se describe en palabras:
 # =============================================================================
 # 1. DEFINIR TAMAÑOS DE BUFFER
 # =============================================================================
-buffer_sizes_km <- 0.75 * 2^(0:5)
+buffer_sizes_km <- c(0.75,  1.5,  3,  6, 12, 24, 50)
 names(buffer_sizes_km) <- paste0("buffer_", buffer_sizes_km)
 
 cat("📏 Tamaños de buffer a utilizar:\n")
@@ -530,7 +530,7 @@ extract_tree_values_km <- function(raster_file, points_df, buffer_sizes_m) {
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("🌎 EXTRACCIÓN PARA LATAM\n")
 
-raster_latam <- "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_mean_1992_2022_300m_europe.tif"
+raster_latam <- "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_mean_1992_2022_300m_latam.tif"
 
 if (file.exists(raster_latam)) {
   
@@ -603,7 +603,7 @@ plot1 <- ggplot() +
   geom_sf(data = land_polyg_latam, fill = "grey75", color = "grey50") +
   geom_point(
     data = latam_extraction,
-    aes(x = longitude, y = latitude, color = Tree_Buffer_0.75km), size = 1.5) +
+    aes(x = longitude, y = latitude, color = Tree_Buffer_50km), size = 1.5) +
   scale_color_gradientn(colours = hcl.colors(11, "ag_Sunset", rev = T)) +
   scale_x_continuous(expand = c(0,0)) +
   scale_y_continuous(expand = c(0,0)) +
@@ -617,7 +617,7 @@ plot2 <- ggplot() +
   geom_sf(data = land_polyg_eur, fill = "grey75", color = "grey50") +
   geom_point(
     data = europe_extraction,
-    aes(x = longitude, y = latitude, color = Tree_Buffer_0.75km), size = 1.5) +
+    aes(x = longitude, y = latitude, color = Tree_Buffer_50km), size = 1.5) +
   scale_color_gradientn(colours = hcl.colors(11, "ag_Sunset", rev = T)) +
   scale_x_continuous(expand = c(0,0)) +
   scale_y_continuous(expand = c(0,0)) +
@@ -631,136 +631,380 @@ plot2
 
 
 
+```{r}
+
+# =============================================================================
+# FUNCIÓN GAUSSIANA - VERSIÓN DEFINITIVA (con extract de terra)
+# =============================================================================
+extract_gaussian_weighted <- function(raster_file, points_df, sigma_m = 500, 
+                                      radio_busqueda_m = 50000) {
+  
+  # Cargar librerías necesarias
+  library(terra)
+  library(sf)
+  
+  cat("\n📂 Cargando raster:", basename(raster_file), "\n")
+  tree_raster <- rast(raster_file)
+  
+  # Verificar si el raster tiene múltiples capas
+  if (nlyr(tree_raster) > 1) {
+    cat("   ⚠️ El raster tiene", nlyr(tree_raster), "capas. Usando la primera capa.\n")
+    tree_raster <- tree_raster[[1]]
+  }
+  
+  cat("🔄 Preparando puntos...\n")
+  points_sf <- st_as_sf(points_df, coords = c("longitude", "latitude"), crs = 4326)
+  
+  # Proyección en metros
+  crs_metros <- "+proj=eqc +lon_0=0 +lat_ts=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m"
+  points_proj <- st_transform(points_sf, crs = crs_metros)
+  coords_proj <- st_coordinates(points_proj)
+  
+  n_points <- nrow(points_df)
+  gaussian_values <- rep(NA, n_points)
+  
+  cat("🔄 Calculando valor Gaussiano ponderado (σ =", sigma_m/1000, "km, radio =", 
+      radio_busqueda_m/1000, "km)...\n")
+  cat("   Esto puede tomar un momento. Por favor espera...\n")
+  
+  # Barra de progreso
+  pb <- txtProgressBar(min = 0, max = n_points, style = 3)
+  
+  for (i in 1:n_points) {
+    setTxtProgressBar(pb, i)
+    
+    # 1. Crear buffer circular
+    punto_i <- points_proj[i, ]
+    buffer_i <- st_buffer(punto_i, dist = radio_busqueda_m)
+    buffer_i_wgs84 <- st_transform(buffer_i, crs = 4326)
+    
+    # 2. Extraer TODOS los valores dentro del buffer usando extract de terra
+    #    Esto es más estable que crop + mask + values
+    valores_extraidos <- tryCatch({
+      # Extraer valores usando el buffer como geometría
+      extr <- terra::extract(tree_raster, vect(buffer_i_wgs84), 
+                             cells = TRUE, ID = FALSE)
+      extr
+    }, error = function(e) {
+      return(NULL)
+    })
+    
+    # Si no se pudo extraer, saltar
+    if (is.null(valores_extraidos)) next
+    if (nrow(valores_extraidos) == 0) next
+    
+    # 3. Obtener coordenadas de las celdas extraídas
+    celdas_ids <- valores_extraidos$cell
+    if (length(celdas_ids) == 0) next
+    
+    celdas_xy <- xyFromCell(tree_raster, celdas_ids)
+    valores <- valores_extraidos[, 1]  # Primera columna = valores (si no hay NA)
+    
+    # Eliminar NAs
+    idx_validos <- which(!is.na(valores))
+    if (length(idx_validos) == 0) next
+    
+    celdas_xy <- celdas_xy[idx_validos, , drop = FALSE]
+    valores <- valores[idx_validos]
+    
+    # 4. Proyectar celdas a metros
+    celdas_sf <- st_as_sf(as.data.frame(celdas_xy), coords = c("x", "y"), crs = 4326)
+    celdas_proj <- st_transform(celdas_sf, crs = crs_metros)
+    coords_celdas <- st_coordinates(celdas_proj)
+    
+    # 5. Calcular distancias en metros
+    x_center <- coords_proj[i, "X"]
+    y_center <- coords_proj[i, "Y"]
+    
+    distancias <- sqrt((coords_celdas[, "X"] - x_center)^2 + 
+                       (coords_celdas[, "Y"] - y_center)^2)
+    
+    # 6. Calcular pesos Gaussianos
+    pesos <- exp(- (distancias^2) / (2 * (sigma_m^2)))
+    
+    # 7. Calcular promedio ponderado
+    if (sum(pesos) > 0) {
+      gaussian_values[i] <- weighted.mean(valores, w = pesos, na.rm = TRUE)
+    }
+  }
+  
+  close(pb)
+  
+  # 8. Crear dataframe de resultados
+  result_df <- data.frame(
+    id_sample = points_df$id_sample,
+    entity_name = points_df$entity_name,
+    latitude = points_df$latitude,
+    longitude = points_df$longitude,
+    Tree_Gaussian_km = gaussian_values
+  )
+  
+  # Guardar parámetros
+  attr(result_df, "sigma_km") <- sigma_m / 1000
+  attr(result_df, "radio_busqueda_km") <- radio_busqueda_m / 1000
+  attr(result_df, "metodo") <- "Gaussiana ponderada 2D (con extract)"
+  
+  cat("\n✅ Extracción Gaussiana completada\n")
+  cat("📊 Estadísticas del valor Gaussiano:\n")
+  cat("   Media:", round(mean(gaussian_values, na.rm = TRUE), 4), "\n")
+  cat("   Min:", round(min(gaussian_values, na.rm = TRUE), 4), "\n")
+  cat("   Max:", round(max(gaussian_values, na.rm = TRUE), 4), "\n")
+  cat("   NAs:", sum(is.na(gaussian_values)), "\n")
+  cat("   σ usado:", attr(result_df, "sigma_km"), "km\n")
+  cat("   Radio de búsqueda:", attr(result_df, "radio_busqueda_km"), "km\n")
+  
+  return(result_df)
+}
+
+```
+
+
+
+LATAM GAUSSIAN 500 M
+```{r}
+# =============================================================================
+# EJECUCIÓN DE LA NUEVA EXTRACCIÓN GAUSSIANA PARA LATAM
+# =============================================================================
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("🌎 EXTRACCIÓN GAUSSIANA PARA LATAM (σ = 500 m)\n")
+
+# Si ya tienes cargado el raster, puedes pasarlo directamente,
+# pero la función espera la ruta, así que lo dejamos igual.
+raster_latam <- "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_mean_1992_2022_300m_latam.tif"
+
+if (file.exists(raster_latam)) {
+  
+  # Extraer con σ = 500 m (valor por defecto para musgo/suelo)
+  latam_gaussian_500m <- extract_gaussian_weighted(
+    raster_file = raster_latam,
+    points_df = modern_pollen_latam,
+    sigma_m = 500,          # 500 metros (local)
+    radio_busqueda_m = 50000 # 50 km fijo
+  )
+  
+  # Guardar resultados Gaussianos (por separado)
+  saveRDS(latam_gaussian_500m, 
+          "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_gaussian_500m.rds")
+  
+  cat("\n💾 Resultados Gaussianos guardados en:\n")
+  cat("   Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_gaussian_500m.rds\n")
+  
+} else {
+  cat("❌ Archivo no encontrado:", raster_latam, "\n")
+}
+
+
+latam_gaussian_500m <- latam_gaussian_500m  |> rename(Gaussian_500m = Tree_Gaussian_km)
+
+saveRDS(latam_gaussian_500m, "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_gaussian_500m.rds")
+```
+
+
+LATAM GAUSSIAN 10KM
+```{r}
+# =============================================================================
+# (OPCIONAL) EXTRACCIÓN CON σ = 10 km (para simular lagos grandes)
+# =============================================================================
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("🌎 EXTRACCIÓN GAUSSIANA PARA LATAM (σ = 10 km) - OPCIONAL\n")
+
+if (file.exists(raster_latam)) {
+  
+  latam_gaussian_10km <- extract_gaussian_weighted(
+    raster_file = raster_latam,
+    points_df = modern_pollen_latam,
+    sigma_m = 10000,        # 10 km (regional)
+    radio_busqueda_m = 50000 # 50 km fijo
+  )
+  
+  saveRDS(latam_gaussian_10km, 
+          "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_gaussian_10km.rds")
+}
+
+
+latam_gaussian_10km <- latam_gaussian_10km  |> rename(Gaussian_10km = Tree_Gaussian_km)
+
+saveRDS(latam_gaussian_10km, "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_gaussian_10km.rds")
+```
+
+
+EUROPE GAUSSIAN 500 M
+```{r}
+# =============================================================================
+# EJECUCIÓN DE LA EXTRACCIÓN GAUSSIANA PARA SMPDS (EUROPA) - σ = 500 m
+# =============================================================================
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("🌍 EXTRACCIÓN GAUSSIANA PARA SMPDS (EUROPA) - σ = 500 m\n")
+
+# Ruta del raster de Europa
+raster_europe <- "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_mean_1992_2022_300m_europe.tif"
+
+if (file.exists(raster_europe)) {
+  
+  # Extraer con σ = 500 m (valor por defecto para musgo/suelo)
+  smpds_gaussian_500m <- extract_gaussian_weighted(
+    raster_file = raster_europe,
+    points_df = modern_pollen_smpds,  # <--- CAMBIADO: modern_pollen_smpds
+    sigma_m = 500,                    # 500 metros (local)
+    radio_busqueda_m = 50000          # 50 km fijo
+  )
+  
+  # Guardar resultados Gaussianos
+  saveRDS(smpds_gaussian_500m, 
+          "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_smpds_gaussian_500m.rds")
+  
+  cat("\n💾 Resultados Gaussianos guardados en:\n")
+  cat("   Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_smpds_gaussian_500m.rds\n")
+  
+  
+} else {
+  cat("❌ Archivo no encontrado:", raster_europe, "\n")
+  cat("   Verifica que la ruta sea correcta.\n")
+}
+
+
+smpds_gaussian_500m <- smpds_gaussian_500m |> rename(Gaussian_500m = Tree_Gaussian_km)
+
+saveRDS(smpds_gaussian_500m, "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_smpds_gaussian_500m.rds")
+```
+
+
+# =============================================================================
+# EXTRACCIÓN CON σ = 10 km PARA SMPDS (EUROPA) - OPCIONAL
+# =============================================================================
+```{r}
+# =============================================================================
+# EXTRACCIÓN CON σ = 10 km PARA SMPDS (EUROPA) - OPCIONAL
+# =============================================================================
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("🌍 EXTRACCIÓN GAUSSIANA PARA SMPDS (EUROPA) - σ = 10 km (OPCIONAL)\n")
+
+if (file.exists(raster_europe)) {
+  
+  smpds_gaussian_10km <- extract_gaussian_weighted(
+    raster_file = raster_europe,
+    points_df = modern_pollen_smpds,  # <--- CAMBIADO: modern_pollen_smpds
+    sigma_m = 10000,                  # 10 km (regional, para simular lagos)
+    radio_busqueda_m = 50000          # 50 km fijo
+  )
+  
+  saveRDS(smpds_gaussian_10km, 
+          "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_smpds_gaussian_10km.rds")
+  
+  cat("\n💾 Resultados Gaussianos (10 km) guardados en:\n")
+  cat("   Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_smpds_gaussian_10km.rds\n")
+  
+  
+} else {
+  cat("❌ Archivo no encontrado:", raster_europe, "\n")
+}
+
+
+smpds_gaussian_10km <- smpds_gaussian_10km |> rename(Gaussian_10km = Tree_Gaussian_km)
+
+saveRDS(smpds_gaussian_10km, "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_smpds_gaussian_10km.rds")
+```
+
+
+
+```{r}
+latam_ext_gauss <- latam_extraction |>
+  left_join(latam_gaussian_500m) |>
+  left_join(latam_gaussian_10km) |>
+  rename(Gaussian_0.5km = Gaussian_500m)
+
+
+smpds_ext_gauss <- europe_extraction |>
+  left_join(smpds_gaussian_500m) |>
+  left_join(smpds_gaussian_10km) |>
+  rename(Gaussian_0.5km = Gaussian_500m)
+```
+
+
+
+ENSAMBLE FINAL
+
+
+```{r}
+smpds_modern_pollen_ext <- modern_pollen_smpds |>
+  select(-gdd, -MI, -Tmin, -alpha) |>
+  rename(hill_n2 = Hill_N2) |>
+  left_join(smpds_ext_gauss) |>
+  select(id_sample, entity_name, latitude, longitude, elevation, hill_n2, Tree_Point:Gaussian_10km, everything())
+
+smpds_modern_pollen_ext <- smpds_modern_pollen_ext |>
+  pivot_longer(cols = -c(id_sample:Gaussian_10km)) |>
+  filter(value >= 0) |>
+  arrange(name) |>
+  pivot_wider(id_cols = c(id_sample:Gaussian_10km))
+
+
+
+
+latam_modern_pollen_ext <- modern_pollen_latam |>
+  select(-mapr, -mi, -gdd0, -mat, -mtco, -mtwa, -alpha, -site_type, -entity_type, -age_bp) |>
+  left_join(latam_ext_gauss) |>
+  select(id_sample, entity_name, latitude, longitude, elevation, hill_n2, Tree_Point:Gaussian_10km, everything())
+
+
+latam_modern_pollen_ext <- latam_modern_pollen_ext |>
+  pivot_longer(cols = -c(id_sample:Gaussian_10km)) |>
+  filter(value >= 0) |>
+  arrange(name) |>
+  pivot_wider(id_cols = c(id_sample:Tree_Buffer_24km))
+
+```
+
+
+```{r}
+saveRDS(smpds_modern_pollen_ext, "Data/Input/EUROP_tree_extraction_and_pollen_modern.rds")
+
+saveRDS(latam_modern_pollen_ext, "Data/Input/LATAM_tree_extraction_and_pollen_modern.rds")
+
+```
+
+
+
+
 Visualizacion
 ```{r}
-# =============================================================================
-# 3. RELACIÓN ENTRE TAMAÑO DE BUFFER Y MEDIA
-# =============================================================================
-# Seleccionar columnas de Tree
-tree_cols <- grep("Tree", colnames(europe_extraction), value = TRUE)
+aux_plot_smpds <- smpds_ext_gauss |> pivot_longer(cols = -c(id_sample, entity_name, latitude, longitude))
 
-# Preparar datos para visualización
-europe_long <- europe_extraction %>%
-  select(all_of(tree_cols)) %>%
-  pivot_longer(cols = everything(), 
-               names_to = "Extraction_Type", 
-               values_to = "Tree_Fraction")
-
-# Extraer el tamaño del buffer de los nombres
-europe_long <- europe_long %>%
-  mutate(
-    Buffer_Size = case_when(
-      Extraction_Type == "Tree_Point" ~ "Punto",
-      TRUE ~ gsub("Tree_Buffer_", "", Extraction_Type)
-    ),
-    Buffer_Size = factor(Buffer_Size, 
-                         levels = c("Punto", "0.75km", "1.5km", "3km", "6km", "12km", "24km")))
-
-
-# Calcular medias por buffer
-buffer_means <- europe_long %>%
-  filter(Buffer_Size != "Punto") %>%
-  group_by(Buffer_Size) %>%
-  summarise(
-    Mean = mean(Tree_Fraction, na.rm = TRUE),
-    SD = sd(Tree_Fraction, na.rm = TRUE)
-  ) %>%
-  mutate(
-    Buffer_Size_Num = as.numeric(gsub("km", "", Buffer_Size))
-  )
-
-print(buffer_means)
-
-# Gráfico de media vs buffer size
-p3 <- ggplot(buffer_means, aes(x = Buffer_Size_Num, y = Mean)) +
-  geom_point(size = 3, color = "blue") +
-  geom_errorbar(aes(ymin = Mean - SD, ymax = Mean + SD), width = 0.5) +
-  geom_line(group = 1, linetype = "dashed", color = "gray50") +
-  labs(title = "Tree Fraction promedio vs tamaño de buffer",
-       x = "Tamaño de buffer (km)", y = "Media de Tree Fraction") +
-  theme_minimal()
-
-print(p3)
+aux_plot_latam <- latam_ext_gauss |> pivot_longer(cols = -c(id_sample, entity_name, latitude, longitude))
 ```
-
-
-
-
-
-
 
 
 
 ```{r}
-# =============================================================================
-# 9. VISUALIZACIÓN
-# =============================================================================
-
-# Preparar datos para visualización
-buffer_long <- resultados_tree_buffer %>%
-  select(id_sample, latitude, longitude, starts_with("Tree_PFT")) %>%
-  pivot_longer(
-    cols = starts_with("Tree_PFT"),
-    names_to = "buffer",
-    values_to = "Tree_PFT"
-  ) %>%
-  mutate(
-    buffer_km = as.numeric(str_extract(buffer, "\\d+"))
-  )
-
-# Boxplot por buffer
-ggplot(buffer_long, aes(x = factor(buffer_km), y = Tree_PFT)) +
-  geom_boxplot(fill = "darkgreen", alpha = 0.6, color = "darkgreen") +
-  stat_summary(fun = mean, geom = "point", shape = 18, size = 4, color = "red") +
-  labs(
-    title = "Tree frac. by buffer size (1992-2015)",
-    x = "Buffer size (km)",
-    y = "Tree frac."
-  ) +
-  theme_minimal()
-
-# Mapa con puntos coloreados por Tree PFT (buffer 6 km)
 ggplot() +
-  geom_sf(data = land_polyg, fill = "white") +
-  geom_point(
-    data = resultados_tree_buffer,
-    aes(longitude, latitude, fill = Tree_PFT_6km),
-    size = 1.8,
-    shape = 21
-  ) +
-  jcolors::scale_fill_jcolors_contin(palette = "pal2") +
-  labs(
-    title = "Tree PFT (buffer 6 km, 1992-2015)",
-    x = "Longitud", y = "Latitud",
-    fill = "Tree fraction"
-  ) +
-  coord_sf() +
-  theme_minimal()
-
-ggplot() +
-  geom_sf(data = land_polyg, fill = "white") +
-  geom_point(
-    data = resultados_tree_buffer,
-    aes(longitude, latitude, fill = Tree_PFT_12km),
-    size = 1.8,
-    shape = 21
-  ) +
-  jcolors::scale_fill_jcolors_contin(palette = "pal2") +
-  labs(
-    title = "Tree PFT (buffer 12 km, 1992-2015)",
-    x = "Longitud", y = "Latitud",
-    fill = "Tree fraction"
-  ) +
-  coord_sf() +
-  theme_minimal()
+geom_sf(data = land_polyg_latam, fill = "grey75", color = "grey50") +
+  geom_point(data = aux_plot_latam,
+             aes(x = longitude, y = latitude, color = value), size = 1.5) +
+  facet_wrap(~name) +
+  scale_color_gradientn(colours = hcl.colors(11, "ag_Sunset", rev = T)) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL) +
+  theme_bw()
 ```
+
 
 
 ```{r}
-saveRDS(resultados_tree_buffer, "Output_data/Tree_PFT_1992_2015_buffers.rds")
-
-
-cat("\n💾 Resultados guardados en: Tree_PFT_1992_2015_buffers.rds\n")
-
+ggplot() +
+geom_sf(data = land_polyg_eur, fill = "grey75", color = "grey50") +
+  geom_point(data = aux_plot_smpds,
+             aes(x = longitude, y = latitude, color = value), size = 1.5) +
+  facet_wrap(~name) +
+  scale_color_gradientn(colours = hcl.colors(11, "ag_Sunset", rev = T)) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL) +
+  theme_bw()
 ```
+
+
+
+
+
 
