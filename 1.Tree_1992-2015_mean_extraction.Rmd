@@ -580,7 +580,7 @@ if (file.exists(raster_europe)) {
   cat("   Columnas extraídas:", ncol(europe_extraction), "\n")
   
   # Guardar resultados
-  saveRDS(europe_extraction, "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_europe_km.rds")
+  saveRDS(europe_extraction, "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_smpds_km.rds")
   
 } else {
   cat("❌ Archivo no encontrado:", raster_europe, "\n")
@@ -591,7 +591,7 @@ if (file.exists(raster_europe)) {
 
 
 ```{r}
-europe_extraction <- readRDS("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_europe_km.rds")
+europe_extraction <- readRDS("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_smpds_km.rds")
 
 latam_extraction <- readRDS("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_km.rds")
 ```
