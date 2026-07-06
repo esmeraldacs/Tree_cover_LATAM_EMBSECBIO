@@ -1,0 +1,603 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-07-05"
+---
+
+
+```{r}
+#You can install the released version of fxTWAPLS from CRAN with:
+#install.packages("fxTWAPLS")
+library(tidyverse)
+library(fxTWAPLS)
+library(foreach)
+```
+
+
+1. Setup – define constants and load data
+```{r}
+iteration <- "i1" 
+my_path <-"Data/Processed/Output_calibration_and_reconstruction/"
+
+```
+
+
+```{r}
+# Load data (as before)
+europe_extraction <- readRDS("Data/Input/EUROP_tree_extraction_and_pollen_modern.rds")
+set.seed(9751); europe_extraction <- sample_n(europe_extraction, size = 500)
+
+latam_extraction <- readRDS("Data/Input/LATAM_tree_extraction_and_pollen_modern.rds")
+set.seed(9751); latam_extraction <- sample_n(latam_extraction, size = 500)
+```
+
+
+Chunk 1: Initial set up and load data
+```{r}
+# Definir las columnas target (las de extracción de raster)
+target_cols <- c("Tree_Point", "Tree_Buffer_0.75km", "Tree_Buffer_1.5km",
+                 "Tree_Buffer_3km", "Tree_Buffer_6km", "Tree_Buffer_12km",
+                 "Tree_Buffer_24km", "Tree_Buffer_50km",
+                 "Gaussian_0.5km", "Gaussian_10km")
+
+# Identificar las columnas que NO son target (identificadores + taxa)
+# Para LATAM
+id_cols <- c("id_sample", "entity_name", "latitude", "longitude", 
+                   "elevation", "hill_n2")
+```
+
+
+
+```{r}
+#=========== LATAM ========
+taxa_cols_latam <- setdiff(names(latam_extraction), 
+                          c(id_cols, target_cols))
+# Crear una lista de dataframes para LATAM, cada uno con un target diferente
+latam_target_list <- list()
+
+for (target in target_cols) {
+  # Seleccionar: identificadores + el target actual + todas las taxa
+  latam_target_list[[target]] <- latam_extraction %>%
+    select(all_of(c(id_cols, target, taxa_cols_latam)))
+}
+
+
+
+#======= EUROPE ========
+taxa_cols_europe <- setdiff(names(europe_extraction), 
+                          c(id_cols, target_cols))
+
+europe_target_list <- list()
+
+for (target in target_cols) {
+  # Seleccionar: identificadores + el target actual + todas las taxa
+  europe_target_list[[target]] <- europe_extraction %>%
+    select(all_of(c(id_cols, target, taxa_cols_europe)))
+}
+
+
+
+
+latam_target_list[["Tree_Point"]]
+europe_target_list[["Tree_Point"]]
+```
+
+
+
+```{r}
+#test_Tree_Point <- latam_target_list[["Tree_Point"]]
+
+#target_running <-  "Tree_Point"
+
+#modern_latam <- test_Tree_Point |> pivot_longer(cols = -c(id_sample:target_running),names_to = "taxa") |> filter(value > 0)
+
+#aux2 <- modern_latam |> group_by(taxa) |> mutate(count_taxa = n()) |> ungroup() |> filter(count_taxa >= 10) |> dplyr::select(-count_taxa)
+
+#modern_latam <- aux2 |> group_by(id_sample) |> 
+ # mutate(value = value / sum(value)) |> ungroup() |> arrange(taxa) |> 
+ # pivot_wider(id_cols = c(id_sample:target_running), names_from = "taxa",values_fill = 0) |>
+ # select(where(is.numeric)) |> dplyr::group_by(latitude,longitude) |> 
+ # dplyr::summarise_all(mean) |> dplyr::ungroup() |> dplyr::mutate(id_sample = paste0("ID_",dplyr::row_number())) |>
+ # dplyr::select(id_sample,everything())
+```
+
+
+
+
+```{r}
+# Procesar toda la lista de LATAM con promediado por lat/lon
+latam_prepared <- map2(
+  latam_target_list,
+  names(latam_target_list),
+  ~ {
+    df <- .x
+    target <- .y
+    
+    cat("Procesando LATAM -", target, "\n")
+    
+    # 1. Pivot longer (excluyendo columnas desde id_sample hasta target)
+    modern_long <- df %>%
+      pivot_longer(cols = -c(id_sample:all_of(target)), names_to = "taxa") %>%
+      filter(value > 0)
+    
+    # 2. Filtrar taxa con >= 10 ocurrencias
+    taxa_keep <- modern_long %>%
+      group_by(taxa) %>%
+      summarise(n = n(), .groups = "drop") %>%
+      filter(n >= 10) %>%
+      pull(taxa)
+    
+    # 3. Re-normalizar y pivot wide
+    modern_wide <- modern_long %>%
+      filter(taxa %in% taxa_keep) %>%
+      group_by(id_sample) %>%
+      mutate(value = value / sum(value)) %>%
+      ungroup() %>%
+      arrange(taxa) %>%
+      pivot_wider(
+        id_cols = c(id_sample:all_of(target)),
+        names_from = "taxa",
+        values_from = "value",
+        values_fill = 0
+      )
+    
+    # 4. Seleccionar SOLO columnas numéricas y promediar por lat/lon
+    modern_wide %>%
+      select(where(is.numeric)) %>%
+      group_by(latitude, longitude) %>%
+      summarise(across(everything(), mean, .names = "{.col}"), .groups = "drop") %>%
+      mutate(id_sample = paste0("ID_", row_number())) %>%
+      select(id_sample, everything())
+  }
+)
+
+# Verificar resultados
+names(latam_prepared)
+glimpse(latam_prepared[["Tree_Point"]])
+```
+
+
+
+
+```{r}
+#test_Tree_Point <- europe_target_list[["Tree_Point"]]
+
+#target_running <-  "Tree_Point"
+
+#modern_europe <- test_Tree_Point |> select(where(is.numeric)) |> dplyr::group_by(latitude,longitude) |> dplyr::summarise_all(mean) |> dplyr::ungroup() |> 
+ # dplyr::mutate(id_sample = paste0("ID_",dplyr::row_number())) |> dplyr::select(id_sample,everything())
+  
+```
+
+```{r}
+# Procesar EUROPE - SOLO promediar por lat/lon (sin procesamiento de polen)
+europe_prepared <- map2(
+  europe_target_list,
+  names(europe_target_list),
+  ~ {
+    df <- .x
+    target <- .y
+    
+    cat("Procesando EUROPE -", target, "\n")
+    
+    # Seleccionar SOLO columnas numéricas, promediar por lat/lon
+    df %>%
+      select(where(is.numeric)) %>%
+      group_by(latitude, longitude) %>%
+      summarise(across(everything(), mean, .names = "{.col}"), .groups = "drop") %>%
+      mutate(id_sample = paste0("ID_", row_number())) %>%
+      select(id_sample, everything())
+  }
+)
+
+# Verificar
+names(europe_prepared)
+#glimpse(europe_prepared[["Tree_Point"]], width = 1)
+```
+
+
+Extraer componentes para TWAPLS
+```{r}
+# Extraer componentes para LATAM
+latam_twapls_data <- map2(
+  latam_prepared,
+  names(latam_prepared),
+  ~ {
+    df <- .x
+    target <- .y
+    
+    # Identificar columnas que NO son taxa (id, coordenadas, y el target)
+    id_cols <- c("id_sample", "latitude", "longitude", "elevation", "hill_n2")
+    id_cols_present <- intersect(id_cols, names(df))
+    exclude_cols <- c(id_cols_present, target)
+    taxa_cols <- setdiff(names(df), exclude_cols)
+    
+    list(
+      taxa = df %>% select(all_of(taxa_cols)),
+      target = df[[target]],
+      coords = df %>% select(longitude, latitude),
+      ids = df$id_sample
+    )
+  }
+)
+
+# Extraer componentes para EUROPE
+europe_twapls_data <- map2(
+  europe_prepared,
+  names(europe_prepared),
+  ~ {
+    df <- .x
+    target <- .y
+    
+    id_cols <- c("id_sample", "latitude", "longitude", "elevation", "hill_n2")
+    id_cols_present <- intersect(id_cols, names(df))
+    exclude_cols <- c(id_cols_present, target)
+    taxa_cols <- setdiff(names(df), exclude_cols)
+    
+    list(
+      taxa = df %>% select(all_of(taxa_cols)),
+      target = df[[target]],
+      coords = df %>% select(longitude, latitude),
+      ids = df$id_sample
+    )
+  }
+)
+
+# Verificar que todo está bien
+names(latam_twapls_data)
+latam_twapls_data[["Tree_Point"]]$target[1:5]
+```
+
+
+
+Chunk 1: Extraer componentes para LATAM y EUROPE
+```{r}
+# Extraer componentes para LATAM
+latam_twapls_data <- map2(
+  latam_prepared,
+  names(latam_prepared),
+  ~ {
+    df <- .x
+    target <- .y
+    
+    # Identificar columnas fijas (no son taxa)
+    id_cols <- c("id_sample", "latitude", "longitude", "elevation", "hill_n2")
+    id_cols_present <- intersect(id_cols, names(df))
+    
+    # El target y las columnas fijas se excluyen de las taxa
+    exclude <- c(id_cols_present, target)
+    taxa_cols <- setdiff(names(df), exclude)
+    
+    list(
+      taxa = df %>% select(all_of(taxa_cols)),
+      target = df[[target]],
+      coords = df %>% select(longitude, latitude),
+      ids = df$id_sample
+    )
+  }
+)
+
+
+
+# Extraer componentes para EUROPE
+europe_twapls_data <- map2(
+  europe_prepared,
+  names(europe_prepared),
+  ~ {
+    df <- .x
+    target <- .y
+    
+    id_cols <- c("id_sample", "latitude", "longitude", "elevation", "hill_n2")
+    id_cols_present <- intersect(id_cols, names(df))
+    
+    exclude <- c(id_cols_present, target)
+    taxa_cols <- setdiff(names(df), exclude)
+    
+    list(
+      taxa = df %>% select(all_of(taxa_cols)),
+      target = df[[target]],
+      coords = df %>% select(longitude, latitude),
+      ids = df$id_sample
+    )
+  }
+)
+
+# Verificar un ejemplo
+names(latam_twapls_data)
+
+latam_twapls_data[["Tree_Point"]]$target[1:5]
+```
+
+
+
+Chunk 2: Configurar paralelización y ejecutar TWAPLS para LATAM
+
+```{r, warning=FALSE}
+# Número de CPUs
+CPUS <- 8
+
+# Ejecutar TWAPLS para LATAM (todos los targets)
+latam_results <- map2(
+  latam_twapls_data,
+  names(latam_twapls_data),
+  ~ {
+    cat("\n=== LATAM -", .y, "===\n")
+    
+    taxa <- .x$taxa
+    target <- .x$target
+    coords <- .x$coords
+    
+    # 1. Ajuste del modelo
+    fit <- TWAPLS.w2(taxa, target, nPLS = 5, 
+                     usefx = TRUE, fx_method = "pspline", bin = 0.08)
+    
+    # 2. Matriz de distancias
+    dist_mat <- get_distance(coords, cpus = CPUS)
+    
+    # 3. Pseudo‑sitios para validación cruzada
+    pseudo <- get_pseudo(dist_mat, target, cpus = CPUS)
+    
+    # 4. Validación cruzada - USANDO la sintaxis de tu código original
+    cv_res <- cv.pr.w(taxa, target, nPLS = 5,
+                      TWAPLS.w2,           # fit.fun (posicional)
+                      TWAPLS.predict.w,    # pred.fun (posicional)
+                      pseudo = pseudo,
+                      usefx = TRUE,
+                      fx_method = "pspline",
+                      bin = 0.08,
+                      cpus = CPUS,
+                      test_mode = FALSE) %>% pb()
+    
+    # 5. Test aleatorio de permutaciones
+    rand_test <- rand.t.test.w(cv_res, n.perm = 999) %>%
+      as_tibble() %>%
+      mutate(comp = row_number())
+    
+    # 6. Mejor componente
+    best_comp <- rand_test %>%
+      filter(p < 0.01) %>%
+      slice_min(RMSEP) %>%
+      pull(comp)
+    
+    if (length(best_comp) == 0) {
+      best_comp <- rand_test %>% slice_min(RMSEP) %>% pull(comp)
+      cat("  -> Ningún componente significativo, se usa el de menor RMSEP (comp", best_comp, ")\n")
+    } else {
+      cat("  -> Mejor componente:", best_comp, "\n")
+    }
+    
+    # 7. Observados vs predichos
+    obs_pred <- data.frame(
+      Observed = cv_res$test.x,
+      Predicted = cv_res[[paste0("comp", best_comp)]]
+    )
+    
+    # 8. Métricas
+    rmsep <- sqrt(mean((obs_pred$Observed - obs_pred$Predicted)^2))
+    r2 <- cor(obs_pred$Observed, obs_pred$Predicted)^2
+    
+    performance <- tibble(
+      region = "LATAM",
+      target = .y,
+      best_comp = best_comp,
+      n_samples = length(target),
+      RMSEP = rmsep,
+      R2 = r2
+    )
+    
+    list(
+      target = .y,
+      region = "LATAM",
+      cv = cv_res,
+      rand_test = rand_test,
+      best_comp = best_comp,
+      obs_pred = obs_pred,
+      performance = performance
+    )
+  }
+)
+
+
+
+```
+
+
+
+
+
+
+```{r}
+# Ejecutar TWAPLS para EUROPE (todos los targets)
+europe_results <- map2(
+  europe_twapls_data,
+  names(europe_twapls_data),
+  ~ {
+    cat("\n=== EUROPE -", .y, "===\n")
+    
+    taxa <- .x$taxa
+    target <- .x$target
+    coords <- .x$coords
+    
+    # 1. Ajuste del modelo
+    fit <- TWAPLS.w2(taxa, target, nPLS = 5, 
+                     usefx = TRUE, fx_method = "pspline", bin = 0.05)
+    
+    # 2. Matriz de distancias
+    dist_mat <- get_distance(coords, cpus = CPUS)
+    
+    # 3. Pseudo‑sitios
+    pseudo <- get_pseudo(dist_mat, target, cpus = CPUS)
+    
+    # 4. Validación cruzada
+    cv_res <- cv.pr.w(taxa, target, nPLS = 5,
+                      TWAPLS.w2,
+                      TWAPLS.predict.w,
+                      pseudo = pseudo,
+                      usefx = TRUE,
+                      fx_method = "pspline",
+                      bin = 0.05,
+                      cpus = CPUS,
+                      test_mode = FALSE) %>% pb()
+    
+    # 5. Test aleatorio
+    rand_test <- rand.t.test.w(cv_res, n.perm = 999) %>%
+      as_tibble() %>%
+      mutate(comp = row_number())
+    
+    # 6. Mejor componente
+    best_comp <- rand_test %>%
+      filter(p < 0.01) %>%
+      slice_min(RMSEP) %>%
+      pull(comp)
+    
+    if (length(best_comp) == 0) {
+      best_comp <- rand_test %>% slice_min(RMSEP) %>% pull(comp)
+      cat("  -> Ningún componente significativo, se usa el de menor RMSEP (comp", best_comp, ")\n")
+    } else {
+      cat("  -> Mejor componente:", best_comp, "\n")
+    }
+    
+    # 7. Observados vs predichos
+    obs_pred <- data.frame(
+      Observed = cv_res$test.x,
+      Predicted = cv_res[[paste0("comp", best_comp)]]
+    )
+    
+    # 8. Métricas
+    rmsep <- sqrt(mean((obs_pred$Observed - obs_pred$Predicted)^2))
+    r2 <- cor(obs_pred$Observed, obs_pred$Predicted)^2
+    
+    performance <- tibble(
+      region = "EUROPE",
+      target = .y,
+      best_comp = best_comp,
+      n_samples = length(target),
+      RMSEP = rmsep,
+      R2 = r2
+    )
+    
+    list(
+      target = .y,
+      region = "EUROPE",
+      cv = cv_res,
+      rand_test = rand_test,
+      best_comp = best_comp,
+      obs_pred = obs_pred,
+      performance = performance
+    )
+  }
+)
+```
+
+
+```{r}
+# Combinar performances de LATAM y EUROPE
+all_performance <- bind_rows(
+  map_dfr(latam_results, ~ .x$performance),
+  map_dfr(europe_results, ~ .x$performance)
+)
+
+# Ver tabla completa
+all_performance %>%
+  arrange(region, RMSEP) %>%
+  print(n = Inf)
+
+# Gráfico de RMSEP
+library(ggplot2)
+all_performance %>%
+  mutate(target = factor(target, levels = target_cols)) %>%
+  ggplot(aes(x = target, y = RMSEP, fill = region)) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  coord_flip() +
+  labs(title = "Comparación de RMSEP entre proxies de cobertura arbórea",
+       subtitle = paste("n =", nrow(all_performance), "combinaciones"),
+       x = "Proxy", y = "RMSEP") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+# Gráfico de R²
+all_performance %>%
+  mutate(target = factor(target, levels = target_cols)) %>%
+  ggplot(aes(x = target, y = R2, fill = region)) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  coord_flip() +
+  labs(title = "Comparación de R² entre proxies de cobertura arbórea",
+       x = "Proxy", y = "R²") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+# Gráfico de R² vs RMSEP
+all_performance %>%
+  ggplot(aes(x = R2, y = RMSEP, color = region, shape = region)) +
+  geom_point(size = 3) +
+  geom_text(aes(label = target), vjust = -0.5, size = 2.5) +
+  labs(title = "Relación entre R² y RMSEP",
+       x = "R²", y = "RMSEP") +
+  theme_bw()
+```
+
+
+```{r}
+# Ver el mejor proxy para LATAM
+latam_perf <- map_dfr(latam_results, ~ .x$performance)
+latam_perf %>% arrange(RMSEP) %>% head(3)
+
+# Ver el mejor proxy para EUROPE
+europe_perf <- map_dfr(europe_results, ~ .x$performance)
+europe_perf %>% arrange(RMSEP) %>% head(3)
+
+# Ver un resultado específico
+latam_results[["Tree_Point"]]$performance
+latam_results[["Tree_Point"]]$best_comp
+head(latam_results[["Tree_Point"]]$obs_pred)
+```
+
+Chunk: Graficar observado vs predicho para todos los targets (LATAM)
+```{r}
+# Función para crear gráficos de todos los targets de LATAM
+walk2(
+  latam_results,
+  names(latam_results),
+  ~ {
+    p <- ggplot(.x$obs_pred, aes(x = Observed, y = Predicted)) +
+      geom_point(alpha = 0.5, size = 1.5, color = "darkgreen") +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+      geom_smooth(method = "lm", se = FALSE, color = "red", linewidth = 0.7) +
+      coord_fixed() +
+      labs(title = paste("LATAM -", .y),
+           subtitle = paste("RMSEP =", round(.x$performance$RMSEP, 4),
+                            " | R² =", round(.x$performance$R2, 4),
+                            " | Componente:", .x$best_comp)) +
+      theme_bw()
+    
+    print(p)
+  }
+)
+```
+
+
+
+```{r}
+# Función para crear gráficos de todos los targets de EUROPE
+walk2(
+  europe_results,
+  names(europe_results),
+  ~ {
+    p <- ggplot(.x$obs_pred, aes(x = Observed, y = Predicted)) +
+      geom_point(alpha = 0.5, size = 1.5, color = "darkblue") +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+      geom_smooth(method = "lm", se = FALSE, color = "red", linewidth = 0.7) +
+      coord_fixed() +
+      labs(title = paste("EUROPE -", .y),
+           subtitle = paste("RMSEP =", round(.x$performance$RMSEP, 4),
+                            " | R² =", round(.x$performance$R2, 4),
+                            " | Componente:", .x$best_comp)) +
+      theme_bw()
+    
+    print(p)
+  }
+)
+```
+
+
+
