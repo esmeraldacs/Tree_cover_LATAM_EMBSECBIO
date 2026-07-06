@@ -906,6 +906,17 @@ saveRDS(smpds_gaussian_10km, "Data/Processed/Tree_extraction_EUROPE_LATAM/tree_e
 ```
 
 
+```{r}
+latam_extraction <- readRDS("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_km.rds")
+
+latam_gaussian_500m <- readRDS("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_gaussian_500m.rds")
+
+latam_gaussian_10km <- readRDS("Data/Processed/Tree_extraction_EUROPE_LATAM/tree_extraction_latam_gaussian_10km.rds")
+
+```
+
+
+
 
 ```{r}
 latam_ext_gauss <- latam_extraction |>
@@ -951,7 +962,7 @@ latam_modern_pollen_ext <- latam_modern_pollen_ext |>
   pivot_longer(cols = -c(id_sample:Gaussian_10km)) |>
   filter(value >= 0) |>
   arrange(name) |>
-  pivot_wider(id_cols = c(id_sample:Tree_Buffer_24km))
+  pivot_wider(id_cols = c(id_sample:Gaussian_10km))
 
 ```
 
