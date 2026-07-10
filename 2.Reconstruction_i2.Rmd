@@ -14,6 +14,31 @@ library(foreach)
 ```
 
 
+```{r}
+# Load and prepare land polygon for South America
+land_polyg_latam <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
+) |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-118, -33, -55, 32)) |>
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_latam)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_eur <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-20, 62, 29, 75)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_eur)
+```
+
+
 1. Setup – define constants and load data
 ```{r}
 iteration <- "i1" 
@@ -25,10 +50,10 @@ my_path <-"Data/Processed/Output_calibration_and_reconstruction/"
 ```{r}
 # Load data (as before)
 europe_extraction <- readRDS("Data/Input/EUROP_tree_extraction_and_pollen_modern.rds")
-set.seed(9751); europe_extraction <- sample_n(europe_extraction, size = 500)
+#set.seed(9751); europe_extraction <- sample_n(europe_extraction, size = 500)
 
 latam_extraction <- readRDS("Data/Input/LATAM_tree_extraction_and_pollen_modern.rds")
-set.seed(9751); latam_extraction <- sample_n(latam_extraction, size = 500)
+#set.seed(9751); latam_extraction <- sample_n(latam_extraction, size = 500)
 ```
 
 
@@ -89,7 +114,9 @@ europe_target_list[["Tree_Point"]]
 
 #target_running <-  "Tree_Point"
 
-#modern_latam <- test_Tree_Point |> pivot_longer(cols = -c(id_sample:target_running),names_to = "taxa") |> filter(value > 0)
+#modern_latam <- test_Tree_Point |> 
+ # filter(.data[[target_running]] > 0) |>
+  #pivot_longer(cols = -c(id_sample:target_running),names_to = "taxa") |> filter(value > 0)
 
 #aux2 <- modern_latam |> group_by(taxa) |> mutate(count_taxa = n()) |> ungroup() |> filter(count_taxa >= 10) |> dplyr::select(-count_taxa)
 
@@ -117,6 +144,7 @@ latam_prepared <- map2(
     
     # 1. Pivot longer (excluyendo columnas desde id_sample hasta target)
     modern_long <- df %>%
+      filter(.data[[target]] > 0) |>
       pivot_longer(cols = -c(id_sample:all_of(target)), names_to = "taxa") %>%
       filter(value > 0)
     
@@ -143,17 +171,17 @@ latam_prepared <- map2(
     
     # 4. Seleccionar SOLO columnas numéricas y promediar por lat/lon
     modern_wide %>%
-      select(where(is.numeric)) %>%
-      group_by(latitude, longitude) %>%
-      summarise(across(everything(), mean, .names = "{.col}"), .groups = "drop") %>%
+     # select(where(is.numeric)) %>%
+      #group_by(latitude, longitude) %>%
+      #summarise(across(everything(), mean, .names = "{.col}"), .groups = "drop") %>%
       mutate(id_sample = paste0("ID_", row_number())) %>%
       select(id_sample, everything())
   }
 )
 
 # Verificar resultados
-names(latam_prepared)
-glimpse(latam_prepared[["Tree_Point"]])
+#names(latam_prepared)
+latam_prepared[["Tree_Buffer_50km"]]
 ```
 
 
@@ -182,9 +210,9 @@ europe_prepared <- map2(
     
     # Seleccionar SOLO columnas numéricas, promediar por lat/lon
     df %>%
-      select(where(is.numeric)) %>%
-      group_by(latitude, longitude) %>%
-      summarise(across(everything(), mean, .names = "{.col}"), .groups = "drop") %>%
+     # select(where(is.numeric)) %>%
+     # group_by(latitude, longitude) %>%
+     # summarise(across(everything(), mean, .names = "{.col}"), .groups = "drop") %>%
       mutate(id_sample = paste0("ID_", row_number())) %>%
       select(id_sample, everything())
   }
@@ -196,61 +224,9 @@ names(europe_prepared)
 ```
 
 
-Extraer componentes para TWAPLS
-```{r}
-# Extraer componentes para LATAM
-latam_twapls_data <- map2(
-  latam_prepared,
-  names(latam_prepared),
-  ~ {
-    df <- .x
-    target <- .y
-    
-    # Identificar columnas que NO son taxa (id, coordenadas, y el target)
-    id_cols <- c("id_sample", "latitude", "longitude", "elevation", "hill_n2")
-    id_cols_present <- intersect(id_cols, names(df))
-    exclude_cols <- c(id_cols_present, target)
-    taxa_cols <- setdiff(names(df), exclude_cols)
-    
-    list(
-      taxa = df %>% select(all_of(taxa_cols)),
-      target = df[[target]],
-      coords = df %>% select(longitude, latitude),
-      ids = df$id_sample
-    )
-  }
-)
-
-# Extraer componentes para EUROPE
-europe_twapls_data <- map2(
-  europe_prepared,
-  names(europe_prepared),
-  ~ {
-    df <- .x
-    target <- .y
-    
-    id_cols <- c("id_sample", "latitude", "longitude", "elevation", "hill_n2")
-    id_cols_present <- intersect(id_cols, names(df))
-    exclude_cols <- c(id_cols_present, target)
-    taxa_cols <- setdiff(names(df), exclude_cols)
-    
-    list(
-      taxa = df %>% select(all_of(taxa_cols)),
-      target = df[[target]],
-      coords = df %>% select(longitude, latitude),
-      ids = df$id_sample
-    )
-  }
-)
-
-# Verificar que todo está bien
-names(latam_twapls_data)
-latam_twapls_data[["Tree_Point"]]$target[1:5]
-```
 
 
-
-Chunk 1: Extraer componentes para LATAM y EUROPE
+Chunk 1: Extraer componentes para LATAM
 ```{r}
 # Extraer componentes para LATAM
 latam_twapls_data <- map2(
@@ -261,7 +237,6 @@ latam_twapls_data <- map2(
     target <- .y
     
     # Identificar columnas fijas (no son taxa)
-    id_cols <- c("id_sample", "latitude", "longitude", "elevation", "hill_n2")
     id_cols_present <- intersect(id_cols, names(df))
     
     # El target y las columnas fijas se excluyen de las taxa
@@ -276,9 +251,12 @@ latam_twapls_data <- map2(
     )
   }
 )
+```
 
 
 
+Chunk 1: Extraer componentes para EUROPE
+```{r}
 # Extraer componentes para EUROPE
 europe_twapls_data <- map2(
   europe_prepared,
@@ -359,96 +337,11 @@ latam_results <- map2(
       slice_min(RMSEP) %>%
       pull(comp)
     
-    if (length(best_comp) == 0) {
-      best_comp <- rand_test %>% slice_min(RMSEP) %>% pull(comp)
-      cat("  -> Ningún componente significativo, se usa el de menor RMSEP (comp", best_comp, ")\n")
-    } else {
-      cat("  -> Mejor componente:", best_comp, "\n")
-    }
-    
-    # 7. Observados vs predichos
-    obs_pred <- data.frame(
-      Observed = cv_res$test.x,
-      Predicted = cv_res[[paste0("comp", best_comp)]]
-    )
-    
-    # 8. Métricas
-    rmsep <- sqrt(mean((obs_pred$Observed - obs_pred$Predicted)^2))
-    r2 <- cor(obs_pred$Observed, obs_pred$Predicted)^2
-    
-    performance <- tibble(
-      region = "LATAM",
-      target = .y,
-      best_comp = best_comp,
-      n_samples = length(target),
-      RMSEP = rmsep,
-      R2 = r2
-    )
-    
-    list(
-      target = .y,
-      region = "LATAM",
-      cv = cv_res,
-      rand_test = rand_test,
-      best_comp = best_comp,
-      obs_pred = obs_pred,
-      performance = performance
-    )
-  }
-)
-
-
-
-```
-
-
-
-
-
-
-```{r}
-# Ejecutar TWAPLS para EUROPE (todos los targets)
-europe_results <- map2(
-  europe_twapls_data,
-  names(europe_twapls_data),
-  ~ {
-    cat("\n=== EUROPE -", .y, "===\n")
-    
-    taxa <- .x$taxa
-    target <- .x$target
-    coords <- .x$coords
-    
-    # 1. Ajuste del modelo
-    fit <- TWAPLS.w2(taxa, target, nPLS = 5, 
-                     usefx = TRUE, fx_method = "pspline", bin = 0.05)
-    
-    # 2. Matriz de distancias
-    dist_mat <- get_distance(coords, cpus = CPUS)
-    
-    # 3. Pseudo‑sitios
-    pseudo <- get_pseudo(dist_mat, target, cpus = CPUS)
-    
-    # 4. Validación cruzada
-    cv_res <- cv.pr.w(taxa, target, nPLS = 5,
-                      TWAPLS.w2,
-                      TWAPLS.predict.w,
-                      pseudo = pseudo,
-                      usefx = TRUE,
-                      fx_method = "pspline",
-                      bin = 0.05,
-                      cpus = CPUS,
-                      test_mode = FALSE) %>% pb()
-    
-    # 5. Test aleatorio
-    rand_test <- rand.t.test.w(cv_res, n.perm = 999) %>%
-      as_tibble() %>%
-      mutate(comp = row_number())
-    
-    # 6. Mejor componente
-    best_comp <- rand_test %>%
+     # 6. Mejor componente
+    p_val <- rand_test %>%
       filter(p < 0.01) %>%
       slice_min(RMSEP) %>%
-      pull(comp)
+      pull(p)
     
     if (length(best_comp) == 0) {
       best_comp <- rand_test %>% slice_min(RMSEP) %>% pull(comp)
@@ -468,17 +361,17 @@ europe_results <- map2(
     r2 <- cor(obs_pred$Observed, obs_pred$Predicted)^2
     
     performance <- tibble(
-      region = "EUROPE",
+      region = "LATAM",
       target = .y,
       best_comp = best_comp,
-      n_samples = length(target),
+      p_val = p_val,
       RMSEP = rmsep,
       R2 = r2
     )
     
     list(
       target = .y,
-      region = "EUROPE",
+      region = "LATAM",
       cv = cv_res,
       rand_test = rand_test,
       best_comp = best_comp,
@@ -491,66 +384,414 @@ europe_results <- map2(
 
 
 ```{r}
-# Combinar performances de LATAM y EUROPE
-all_performance <- bind_rows(
-  map_dfr(latam_results, ~ .x$performance),
-  map_dfr(europe_results, ~ .x$performance)
-)
-
-# Ver tabla completa
-all_performance %>%
-  arrange(region, RMSEP) %>%
-  print(n = Inf)
-
-# Gráfico de RMSEP
-library(ggplot2)
-all_performance %>%
-  mutate(target = factor(target, levels = target_cols)) %>%
-  ggplot(aes(x = target, y = RMSEP, fill = region)) +
-  geom_col(position = position_dodge(width = 0.9)) +
-  coord_flip() +
-  labs(title = "Comparación de RMSEP entre proxies de cobertura arbórea",
-       subtitle = paste("n =", nrow(all_performance), "combinaciones"),
-       x = "Proxy", y = "RMSEP") +
-  theme_bw() +
-  theme(legend.position = "bottom")
-
-# Gráfico de R²
-all_performance %>%
-  mutate(target = factor(target, levels = target_cols)) %>%
-  ggplot(aes(x = target, y = R2, fill = region)) +
-  geom_col(position = position_dodge(width = 0.9)) +
-  coord_flip() +
-  labs(title = "Comparación de R² entre proxies de cobertura arbórea",
-       x = "Proxy", y = "R²") +
-  theme_bw() +
-  theme(legend.position = "bottom")
-
-# Gráfico de R² vs RMSEP
-all_performance %>%
-  ggplot(aes(x = R2, y = RMSEP, color = region, shape = region)) +
-  geom_point(size = 3) +
-  geom_text(aes(label = target), vjust = -0.5, size = 2.5) +
-  labs(title = "Relación entre R² y RMSEP",
-       x = "R²", y = "RMSEP") +
-  theme_bw()
+saveRDS(latam_results, file = paste(my_path,"latam_tree_recons_results_",iteration,".rds", sep=""))
 ```
 
 
 ```{r}
-# Ver el mejor proxy para LATAM
-latam_perf <- map_dfr(latam_results, ~ .x$performance)
-latam_perf %>% arrange(RMSEP) %>% head(3)
-
-# Ver el mejor proxy para EUROPE
-europe_perf <- map_dfr(europe_results, ~ .x$performance)
-europe_perf %>% arrange(RMSEP) %>% head(3)
-
-# Ver un resultado específico
-latam_results[["Tree_Point"]]$performance
-latam_results[["Tree_Point"]]$best_comp
-head(latam_results[["Tree_Point"]]$obs_pred)
+latam_results <- readRDS("Data/Processed/Output_calibration_and_reconstruction/latam_tree_recons_results_i1.rds")
 ```
+
+
+
+Chunk 1: Identificar el mejor target
+```{r}
+# LATAM - identificar mejor target (menor RMSEP)
+latam_performance <- map_dfr(latam_results, ~ .x$performance)
+
+best_latam_target <- latam_performance %>%
+  slice_min(RMSEP) %>%
+  pull(target)
+
+#best_latam_rmsep <- latam_performance %>%
+  #slice_min(RMSEP) %>%
+  #pull(RMSEP)
+
+latam_performance
+
+cat("Mejor target en LATAM:", best_latam_target)
+```
+
+
+```{r}
+write.csv(latam_performance, "Data/Processed/Output_calibration_and_reconstruction/latam_performance_i2.csv")
+```
+
+
+Chunk 2: Crear dataframe diagnóstico para LATAM (mejor target)
+```{r}
+# Extraer el mejor resultado de LATAM
+latam_best_result <- latam_results[[best_latam_target]]
+
+# Extraer los datos preparados originales para ese target
+latam_best_data <- latam_prepared[[best_latam_target]]
+
+
+# Verificar que tienen el mismo número de filas
+cat("Número de filas en obs_pred:", nrow(latam_best_result$obs_pred), "\n")
+cat("Número de filas en datos preparados:", nrow(latam_best_data), "\n")
+
+
+
+# Crear dataframe diagnóstico para LATAM
+latam_diagnostic <- latam_best_data %>%
+  # Unir con observed y predicted
+  bind_cols(
+    Observed = latam_best_result$obs_pred$Observed,
+    Predicted = latam_best_result$obs_pred$Predicted) %>%
+  # Calcular métricas de error
+  mutate(
+    Residual = Observed - Predicted,
+    Abs_Residual = abs(Residual),
+    Pct_Error = (Abs_Residual / (Observed + 0.001)) * 100,  # +0.001 para evitar división por cero
+    Squared_Error = (Observed - Predicted)^2,
+    Relative_Error = ifelse(Observed > 0, (Observed - Predicted) / Observed, NA),
+  ) %>%
+  # Agregar columna de diagnóstico de calidad
+  mutate(
+    Quality = case_when(
+      Abs_Residual < 0.1 ~ "Excellent",
+      Abs_Residual < 0.2 ~ "Good",
+      Abs_Residual < 0.3 ~ "Regular",
+      TRUE ~ "Poor"
+    )
+  ) %>%
+  # Reorganizar columnas para mejor visualización
+  select(id_sample, entity_name, latitude, longitude, elevation, hill_n2,
+         Observed, Predicted, Residual, Abs_Residual, Pct_Error, Squared_Error, Relative_Error, Quality,
+         everything())
+
+# Ver el resultado
+head(latam_diagnostic[, 1:15])
+```
+
+
+
+```{r}
+# LATAM - mejores y peores predicciones
+latam_best_sites <- latam_diagnostic %>%
+  arrange(Abs_Residual) %>%
+  select(id_sample, ame, entity_nlatitude, longitude, elevation, Observed, Predicted, Abs_Residual, Quality) %>%
+  head(50)
+
+latam_worst_sites <- latam_diagnostic %>%
+  arrange(desc(Abs_Residual)) %>%
+  select(id_sample, latitude, longitude, elevation, Observed, Predicted, Abs_Residual, Quality) %>%
+  head(50)
+```
+
+
+
+
+```{r}
+p1 <- ggplot(latam_diagnostic, aes(x = Abs_Residual)) +
+  geom_histogram(bins = 30, fill = "darkgreen", alpha = 0.7) +
+  geom_vline(xintercept = median(latam_diagnostic$Abs_Residual), 
+             color = "red", linetype = "dashed", linewidth = 1) +
+  labs(title = paste("LATAM:", best_latam_target),
+       subtitle = paste("Median =", 
+                        round(median(latam_diagnostic$Abs_Residual), 4)),
+       x = "Absolute error", y = "Freq") +
+  theme_bw()
+
+p1
+
+p2 <- ggplot() +
+  geom_point(data = latam_diagnostic, aes(x = Observed, y = Predicted, color = Quality), alpha = 0.6, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+   geom_point(data = latam_worst_sites, aes(x = Observed, y = Predicted),shape=8, size = 0.4, colour="gray20") +
+  coord_fixed() +
+  labs(title = paste("LATAM:", best_latam_target)) +
+  theme_bw()
+
+p2
+```
+
+
+
+```{r}
+lims <- range(c(latam_diagnostic$Observed,
+                latam_diagnostic$Predicted),
+              na.rm = TRUE)
+breaks <- pretty(lims, n = 5)
+
+p3 <- ggplot() +
+  geom_sf(data = land_polyg_latam) +
+  geom_point(data = latam_diagnostic,
+             aes(x = longitude, y = latitude, colour = Observed)) +
+  scale_color_gradientn(
+    colours = hcl.colors(11, "ag_Sunset", rev = TRUE),
+    limits = lims,
+    breaks = breaks
+  ) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x = NULL, y = NULL) +
+  theme_bw()
+p3
+
+p4 <- ggplot() +
+  geom_sf(data = land_polyg_latam) +
+  geom_point(data = latam_diagnostic,
+             aes(x = longitude, y = latitude, colour = Predicted)) +
+  scale_color_gradientn(
+    colours = hcl.colors(11, "ag_Sunset", rev = TRUE),
+    limits = lims,
+    breaks = breaks
+  ) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x = NULL, y = NULL) +
+  theme_bw()
+p4
+```
+
+
+```{r}
+# Modificar los plots (sin título individual)
+p3 <- p3 + 
+  labs(colour = "Tree fract") +
+  theme(legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5),
+        legend.title = element_text(angle = 0, hjust = 0.5, vjust = 0.8))
+
+p4 <- p4 + 
+  labs(colour = "Tree fract") +
+  theme(legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5),
+        legend.title = element_text(angle = 0, hjust = 0.5, vjust = 0.8))
+
+# Crear el arreglo
+fig <- ggarrange(p3, p4, 
+          ncol = 2, 
+          common.legend = TRUE,
+          legend = "bottom",
+          labels = c("A) Observed", "B) Predicted"),
+          font.label = list(size = 12, face = "bold", color = "black"),
+          hjust = -0.2,
+          vjust = 0.6)
+
+# Añadir título común
+annotate_figure(fig,
+                top = text_grob(paste("LATAM:", best_latam_target), 
+                               face = "bold", 
+                               size = 12))
+```
+
+
+
+
+
+```{r}
+p4 <- ggplot() +
+  geom_sf(data = land_polyg_latam) +
+  geom_point(data = latam_diagnostic,
+             aes(x = longitude, y = latitude, colour = Squared_Error)) +
+  scale_color_gradientn(
+    colours = hcl.colors(11, "Batlow", rev = TRUE)) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x = NULL, y = NULL,
+       title="Squared Error",
+       subtitle=paste("LATAM:", best_latam_target)) +
+  theme_bw()
+
+p4
+
+p5 <- ggplot() +
+  geom_sf(data = land_polyg_latam) +
+  geom_point(data = latam_diagnostic,
+             aes(x = longitude, y = latitude, colour = Abs_Residual)) +
+  scale_color_gradientn(
+    colours = hcl.colors(11, "Batlow", rev = TRUE)) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x = NULL, y = NULL,
+       title="Absolute residual",
+       subtitle=paste("LATAM:", best_latam_target)) +
+  theme_bw()
+
+p5
+```
+
+
+
+```{r}
+# 1. Calcular límites comunes para Squared_Error y Abs_Residual
+lims_residuals <- range(c(latam_diagnostic$Squared_Error,
+                          latam_diagnostic$Abs_Residual),
+                        na.rm = TRUE)
+breaks_residuals <- pretty(lims_residuals, n = 5)
+
+# 2. Re-crear los plots con escala común y sin títulos/subtítulos
+p4 <- ggplot() +
+  geom_sf(data = land_polyg_latam) +
+  geom_point(data = latam_diagnostic,
+             aes(x = longitude, y = latitude, colour = Squared_Error)) +
+  scale_color_gradientn(
+    colours = hcl.colors(11, "Batlow", rev = TRUE),
+    limits = lims_residuals,      # <-- Escala común
+    breaks = breaks_residuals     # <-- Cortes comunes
+  ) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x = NULL, y = NULL, colour = "Residuals") +  # Título de leyenda común
+  ggtitle("Squared Error") +  # Título individual
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5))
+
+p5 <- ggplot() +
+  geom_sf(data = land_polyg_latam) +
+  geom_point(data = latam_diagnostic,
+             aes(x = longitude, y = latitude, colour = Abs_Residual)) +
+  scale_color_gradientn(
+    colours = hcl.colors(11, "Batlow", rev = TRUE),
+    limits = lims_residuals,      # <-- Escala común
+    breaks = breaks_residuals     # <-- Cortes comunes
+  ) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x = NULL, y = NULL, colour = "Residuals") +  # Título de leyenda común
+  ggtitle("Absolute Residual") +  # Título individual
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5))
+
+# 3. Juntar con ggarrange
+library(ggpubr)
+
+fig_residuals <- ggarrange(p4, p5, 
+                           ncol = 2, 
+                           common.legend = TRUE,
+                           legend = "bottom",
+                           labels = NULL)  # Sin labels porque ya tienen títulos
+
+# 4. Añadir título común (opcional)
+annotate_figure(fig_residuals,
+                top = text_grob(paste("LATAM:", best_latam_target), 
+                               face = "bold", 
+                               size = 16))
+```
+
+
+
+
+```{r}
+# 1. Calcular límites comunes para elevation (de ambos datasets)
+lims_elev <- range(c(latam_worst_sites$elevation,
+                     latam_best_sites$elevation),
+                   na.rm = TRUE)
+breaks_elev <- pretty(lims_elev, n = 5)
+
+# 2. Re-crear los plots con escala correcta
+p4 <- ggplot() +
+  geom_sf(data = land_polyg_latam) +
+  geom_point(data = latam_worst_sites, 
+             aes(x = longitude, y = latitude, colour = elevation)) +
+  scale_color_gradientn(
+    colours = hcl.colors(11, "Lajolla", rev = T),
+    limits = lims_elev,      # <-- Límites de elevación
+    breaks = breaks_elev     # <-- Cortes de elevación
+  ) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x = NULL, y = NULL, colour = "Elevation") +  # Título de leyenda
+  ggtitle("Worst 50 sites") +  # Título identificador
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+p5 <- ggplot() +
+  geom_sf(data = land_polyg_latam) +
+  geom_point(data = latam_best_sites, 
+             aes(x = longitude, y = latitude, colour = elevation)) +
+  scale_color_gradientn(
+    colours = hcl.colors(11, "Lajolla", rev = T),  # <-- Corregido: 11
+    limits = lims_elev,      # <-- Límites de elevación
+    breaks = breaks_elev     # <-- Cortes de elevación
+  ) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x = NULL, y = NULL, colour = "Elevation") +
+  ggtitle("Best 50 sites") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# 3. Verificar los plots individualmente
+p4
+p5
+```
+
+
+```{r}
+library(ggpubr)
+
+# Juntar con leyenda común
+fig_sites <- ggarrange(p4, p5, 
+                       ncol = 2, 
+                       common.legend = TRUE,
+                       legend = "bottom",
+                       labels = NULL)  # Sin labels porque tienen títulos
+
+# Añadir título común
+annotate_figure(fig_sites,
+                top = text_grob("Elevation at Best and Worst Sites", 
+                               face = "bold", 
+                               size = 16))
+```
+
+
+
+
+```{r}
+# Resumen estadístico de los errores
+cat("\n=== RESUMEN DIAGNÓSTICO LATAM (", best_latam_target, ") ===\n")
+latam_diagnostic %>%
+  summarise(
+    n = n(),
+    Mean_Observed = mean(Observed),
+    Mean_Predicted = mean(Predicted),
+    Mean_Residual = mean(Residual),
+    Mean_Abs_Residual = mean(Abs_Residual),
+    Median_Abs_Residual = median(Abs_Residual),
+    RMSE = sqrt(mean(Squared_Error)),
+    Max_Abs_Residual = max(Abs_Residual),
+    Pct_Excelente = mean(Quality == "Excelente") * 100,
+    Pct_Bueno = mean(Quality == "Bueno") * 100,
+    Pct_Regular = mean(Quality == "Regular") * 100,
+    Pct_Pobre = mean(Quality == "Pobre") * 100
+  ) %>%
+  print()
+
+cat("\n=== RESUMEN DIAGNÓSTICO EUROPE (", best_europe_target, ") ===\n")
+europe_diagnostic %>%
+  summarise(
+    n = n(),
+    Mean_Observed = mean(Observed),
+    Mean_Predicted = mean(Predicted),
+    Mean_Residual = mean(Residual),
+    Mean_Abs_Residual = mean(Abs_Residual),
+    Median_Abs_Residual = median(Abs_Residual),
+    RMSE = sqrt(mean(Squared_Error)),
+    Max_Abs_Residual = max(Abs_Residual),
+    Pct_Excelente = mean(Quality == "Excelente") * 100,
+    Pct_Bueno = mean(Quality == "Bueno") * 100,
+    Pct_Regular = mean(Quality == "Regular") * 100,
+    Pct_Pobre = mean(Quality == "Pobre") * 100
+  ) %>%
+  print()
+```
+
+
+
+
+
+
+
+
+
+#########
+#########
+#########
+
 
 Chunk: Graficar observado vs predicho para todos los targets (LATAM)
 ```{r}
@@ -560,14 +801,14 @@ walk2(
   names(latam_results),
   ~ {
     p <- ggplot(.x$obs_pred, aes(x = Observed, y = Predicted)) +
-      geom_point(alpha = 0.5, size = 1.5, color = "darkgreen") +
+      geom_point(alpha = 0.5, size = 1.5, color = "dodgerblue2") +
       geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
-      geom_smooth(method = "lm", se = FALSE, color = "red", linewidth = 0.7) +
+      geom_smooth(method = "lm", se = FALSE, color = "firebrick2", linewidth = 0.7) +
       coord_fixed() +
       labs(title = paste("LATAM -", .y),
            subtitle = paste("RMSEP =", round(.x$performance$RMSEP, 4),
                             " | R² =", round(.x$performance$R2, 4),
-                            " | Componente:", .x$best_comp)) +
+                            " | Component:", .x$best_comp)) +
       theme_bw()
     
     print(p)
@@ -577,27 +818,6 @@ walk2(
 
 
 
-```{r}
-# Función para crear gráficos de todos los targets de EUROPE
-walk2(
-  europe_results,
-  names(europe_results),
-  ~ {
-    p <- ggplot(.x$obs_pred, aes(x = Observed, y = Predicted)) +
-      geom_point(alpha = 0.5, size = 1.5, color = "darkblue") +
-      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
-      geom_smooth(method = "lm", se = FALSE, color = "red", linewidth = 0.7) +
-      coord_fixed() +
-      labs(title = paste("EUROPE -", .y),
-           subtitle = paste("RMSEP =", round(.x$performance$RMSEP, 4),
-                            " | R² =", round(.x$performance$R2, 4),
-                            " | Componente:", .x$best_comp)) +
-      theme_bw()
-    
-    print(p)
-  }
-)
-```
 
 
 
