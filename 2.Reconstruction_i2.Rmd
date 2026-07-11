@@ -4,6 +4,8 @@ output: html_document
 date: "2026-07-05"
 ---
 
+Running only for latam
+
 
 ```{r}
 #You can install the released version of fxTWAPLS from CRAN with:

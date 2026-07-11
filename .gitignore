@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+Data/Processed/Tree_extraction_EUROPE_LATAM/*.tif
+# Ignore all data files
+Data/
+# Ignore generated outputs
+Figures/
+Text_and_csv_files/
