@@ -27,19 +27,6 @@ land_polyg_latam <- sf::st_read(
 ggplot() + geom_sf(data = land_polyg_latam)
 
 
-
-# Load and prepare land polygon for South America
-land_polyg_embs <- sf::st_read(
-  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
-  sf::st_transform(crs = 4326) |>
-  sf::as_Spatial() |>
-  raster::crop(raster::extent(20, 60, 29, 49)) |> #min,x, max.x, min.y, max.y
-  sf::st_as_sf()
-
-ggplot() + geom_sf(data = land_polyg_embs)
-
-
-
 # Load and prepare land polygon for Europe
 land_polyg_eur <- sf::st_read(
   "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
