@@ -12,7 +12,7 @@ library(stringr)
 library(sf)
 ```
 
-
+Condigo para dos regiones simulataneas
 
 ```{r}
 # Load and prepare land polygon for South America
