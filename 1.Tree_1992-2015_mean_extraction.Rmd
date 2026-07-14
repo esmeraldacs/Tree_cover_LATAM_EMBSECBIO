@@ -52,7 +52,7 @@ FACTOR_AGREGACION <- 60      # Ajusta según necesidad
 
 
 
-
+The poulter scheme for converting classes to plant functional type
 ```{r}
 # =============================================================================
 # 1. Definir la conversión PFT (tabla Poulter)
