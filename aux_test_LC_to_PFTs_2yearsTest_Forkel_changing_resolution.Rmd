@@ -1,0 +1,349 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-06-24"
+---
+
+```{r}
+# =============================================================================
+# Load required packages
+# =============================================================================
+library(terra)
+library(tidyverse)
+library(tidyterra)
+library(stringr)
+```
+
+
+```{r}
+# =============================================================================
+# CONFIGURACIÓN DE RESOLUCIÓN
+# =============================================================================
+# Si TRUE: reduce la resolución para pruebas rápidas
+# Si FALSE: usa la resolución original (producción)
+REDUCIR_RESOLUCION <- TRUE  # Cambiar a FALSE para producción
+
+# Factor de agregación (ej. 6 = pasar de 300m a ~1800m)
+# 300m * 6 = 1800m (~1.8 km)
+# 300m * 12 = 3600m (~3.6 km)
+# 300m * 60 = 18000m (~18 km, ~0.166°)
+FACTOR_AGREGACION <- 20  # Ajusta según necesidad
+```
+
+
+
+```{r}
+poulter <- list(
+  "10" = list(Crop = 1),
+  "11" = list(Crop = 1),
+  "12" = list(Crop = 0.5, Shrub = 0.5),
+  "20" = list(Crop = 1),
+  "30" = list(Tree = 0.10, Shrub = 0.15, Grass = 0.60, Crop = 0.15),
+  "40" = list(Tree = 0.10, Shrub = 0.20, Grass = 0.30, Crop = 0.40),
+  "50" = list(Tree = 0.9, Shrub = 0.1),
+  "60" = list(Tree = 0.7, Shrub = 0.1, Grass = 0.20),
+  "61" = list(Tree = 0.8, Shrub = 0.1, Grass = 0.1),
+  "62" = list(Tree = 0.3, Shrub = 0.2, Grass = 0.4, `Non Vegetated` = 0.1),
+  "70" = list(Tree = 0.7, Shrub = 0.1, Grass = 0.20),
+  "71" = list(Tree = 0.75, Shrub = 0.1, Grass = 0.15),
+  "72" = list(Tree = 0.3, Shrub = 0.1, Grass = 0.30, `Non Vegetated` = 0.3),
+  "80" = list(Tree = 0.50, Shrub = 0.20, Grass = 0.25, `Non Vegetated` = 0.05),
+  "81" = list(Tree = 0.70, Shrub = 0.15, Grass = 0.15),
+  "82" = list(Tree = 0.30, Shrub = 0.15, Grass = 0.35, `Non Vegetated` = 0.20),
+  "90" = list(Tree = 0.6, Shrub = 0.20, Grass = 0.15, `Non Vegetated` = 0.05),
+  "100" = list(Tree = 0.3, Shrub = 0.3, Grass = 0.4),
+  "110" = list(Tree = 0.15, Shrub = 0.2, Grass = 0.6, `Non Vegetated` = 0.05),
+  "120" = list(Shrub = 0.6, Grass = 0.2, `Non Vegetated` = 0.2),
+  "121" = list(Shrub = 0.6, Grass = 0.2, `Non Vegetated` = 0.2),
+  "122" = list(Shrub = 0.6, Grass = 0.2, `Non Vegetated` = 0.2),
+  "130" = list(Grass = 0.7, `Non Vegetated` = 0.3),
+  "140" = list(Grass = 0.6, `Non Vegetated` = 0.4),
+  "150" = list(Tree = 0.04, Shrub = 0.06, Grass = 0.05, `Non Vegetated` = 0.85),
+  "152" = list(Shrub = 0.1, Grass = 0.05, `Non Vegetated` = 0.85),
+  "153" = list(Grass = 0.15, `Non Vegetated` = 0.85),
+  "160" = list(Tree = 0.6, Grass = 0.2, `Non Vegetated` = 0.2),
+  "170" = list(Tree = 0.6, Shrub = 0.2, `Non Vegetated` = 0.2),
+  "180" = list(Tree = 0.1, Shrub = 0.2, Grass = 0.4, `Non Vegetated` = 0.3),
+  "190" = list(Tree = 0.05, Grass = 0.15, `Non Vegetated` = 0.8),
+  "200" = list(`Non Vegetated` = 1.0),
+  "201" = list(`Non Vegetated` = 1.0),
+  "202" = list(`Non Vegetated` = 1.0),
+  "210" = list(`Non Vegetated` = 1.0),
+  "220" = list(`Non Vegetated` = 1.0)
+)
+```
+
+
+
+```{r}
+# =============================================================================
+# 2. Preparar lookups y clases válidas
+# =============================================================================
+valid_classes <- as.integer(names(poulter))
+cat("Clases válidas (", length(valid_classes), "): ", 
+    paste(sort(valid_classes), collapse = ", "), "\n")
+
+pft_names <- c("Tree", "Shrub", "Grass", "Crop", "NonVegetated")
+
+# Inicializar lookups
+lookups <- setNames(lapply(pft_names, function(p) rep(0, 256)), pft_names)
+
+get_frac <- function(lst, key) if (key %in% names(lst)) lst[[key]] else 0
+
+for (lc_class in names(poulter)) {
+  idx <- as.integer(lc_class) + 1
+  frac_list <- poulter[[lc_class]]
+  for (pft in pft_names) {
+    lookups[[pft]][idx] <- get_frac(frac_list, pft)
+  }
+}
+```
+
+```{r}
+# =============================================================================
+# 3. Función de reclasificación
+# =============================================================================
+reclassify_pft <- function(raster_obj, lookup, valid_classes) {
+  from_to <- cbind(valid_classes, lookup[valid_classes + 1])
+  classify(raster_obj, rcl = from_to, others = NA)
+}
+
+```
+
+
+
+```{r}
+# =============================================================================
+# 4. FUNCIÓN PARA REDUCIR RESOLUCIÓN (solo si está activado)
+# =============================================================================
+agregar_raster <- function(raster_obj, factor, fun = "modal") {
+  # Agrega (reduce resolución) usando la función especificada
+  # Para datos categóricos (LC classes), usamos "modal" (moda)
+  # Para datos continuos (PFTs), usaremos "mean" después
+  if (fun == "modal") {
+    aggregate(raster_obj, fact = factor, fun = modal, na.rm = TRUE)
+  } else {
+    aggregate(raster_obj, fact = factor, fun = fun, na.rm = TRUE)
+  }
+}
+```
+
+
+
+```{r}
+# =============================================================================
+# 5. Lista de archivos
+# =============================================================================
+esa_filepath <- list.files(
+  path = "C:/Copernicus_Land_Cover/LATAM_LCCS_1992_to_2022/",
+  pattern = "\\.nc$",
+  full.names = TRUE
+)
+
+# Seleccionar archivos de prueba (1992-1993)
+esa_filepath_test <- esa_filepath[grepl("-(1992|1993)-", esa_filepath)]
+
+cat("\n📁 Archivos seleccionados:\n")
+print(basename(esa_filepath_test))
+
+n_years <- length(esa_filepath_test)
+```
+
+
+```{r}
+# =============================================================================
+# 6. MOSTRAR CONFIGURACIÓN ACTUAL
+# =============================================================================
+cat(paste0("\n", paste(rep("=", 60), collapse = ""), "\n"))
+cat("⚙️  CONFIGURACIÓN ACTUAL\n")
+cat(strrep("=", 60), "\n")
+cat("  Reducir resolución :", ifelse(REDUCIR_RESOLUCION, "✅ SÍ", "❌ NO"), "\n")
+if (REDUCIR_RESOLUCION) {
+  cat("  Factor agregación  :", FACTOR_AGREGACION, "\n")
+  cat("  Resolución aprox. :", 
+      round(0.002777 * FACTOR_AGREGACION * 110, 2), "km\n")
+}
+cat("  Años a procesar    :", n_years, "\n")
+cat(strrep("=", 60), "\n\n")
+
+```
+
+
+
+```{r}
+# =============================================================================
+# 7. PROCESAR AÑOS
+# =============================================================================
+cat("📊 Procesando", n_years, "años...\n")
+
+# Inicializar acumuladores
+sum_tree <- NULL
+sum_shrub <- NULL
+sum_grass <- NULL
+sum_crop <- NULL
+sum_nonveg <- NULL
+
+for (i in seq_along(esa_filepath_test)) {
+  year <- as.numeric(str_extract(basename(esa_filepath_test[i]), "\\d{4}"))
+  cat("\n  📅 Procesando año", year, "...\n")
+  
+  # --- 7.1 Leer raster ---
+  r <- rast(esa_filepath_test[i], subds = "lccs_class")
+  
+  cat("     Resolución original:", res(r)[1], "° x", res(r)[2], "°\n")
+  cat("     Dimensiones originales:", nrow(r), "x", ncol(r), "\n")
+  
+  # --- 7.2 REDUCIR RESOLUCIÓN (si está activado) ---
+  if (REDUCIR_RESOLUCION) {
+    cat("     🔽 Reduciendo resolución (factor =", FACTOR_AGREGACION, ")...\n")
+    r_agg <- agregar_raster(r, FACTOR_AGREGACION, fun = "modal")
+    
+    cat("     Resolución agregada:", res(r_agg)[1], "° x", res(r_agg)[2], "°\n")
+    cat("     Dimensiones agregadas:", nrow(r_agg), "x", ncol(r_agg), "\n")
+    
+    # Usar el raster agregado
+    r_proc <- r_agg
+    rm(r_agg)
+  } else {
+    cat("     ✅ Usando resolución original\n")
+    r_proc <- r
+  }
+  
+  # --- 7.3 Verificar clases ---
+  unique_vals <- unique(values(r_proc))
+  cat("     Clases únicas en raster:", length(unique_vals), "\n")
+  
+  # --- 7.4 Reclasificar a PFTs ---
+  cat("     Traduciendo a PFTs...\n")
+  tree_i <- reclassify_pft(r_proc, lookups[["Tree"]], valid_classes)
+  shrub_i <- reclassify_pft(r_proc, lookups[["Shrub"]], valid_classes)
+  grass_i <- reclassify_pft(r_proc, lookups[["Grass"]], valid_classes)
+  crop_i <- reclassify_pft(r_proc, lookups[["Crop"]], valid_classes)
+  nonveg_i <- reclassify_pft(r_proc, lookups[["NonVegetated"]], valid_classes)
+  
+  # --- 7.5 Acumular ---
+  if (is.null(sum_tree)) {
+    sum_tree <- tree_i
+    sum_shrub <- shrub_i
+    sum_grass <- grass_i
+    sum_crop <- crop_i
+    sum_nonveg <- nonveg_i
+  } else {
+    sum_tree <- sum_tree + tree_i
+    sum_shrub <- sum_shrub + shrub_i
+    sum_grass <- sum_grass + grass_i
+    sum_crop <- sum_crop + crop_i
+    sum_nonveg <- sum_nonveg + nonveg_i
+  }
+  
+  # Limpiar
+  rm(r, r_proc, tree_i, shrub_i, grass_i, crop_i, nonveg_i)
+  gc()
+}
+
+```
+
+
+
+```{r}
+# =============================================================================
+# 8. Calcular promedios
+# =============================================================================
+cat("\n📊 Calculando promedios temporales...\n")
+
+tree_mean <- sum_tree / n_years
+shrub_mean <- sum_shrub / n_years
+grass_mean <- sum_grass / n_years
+crop_mean <- sum_crop / n_years
+nonveg_mean <- sum_nonveg / n_years
+
+pft_means <- c(tree_mean, shrub_mean, grass_mean, crop_mean, nonveg_mean)
+names(pft_means) <- pft_names
+
+# =============================================================================
+# 9. VERIFICACIÓN
+# =============================================================================
+cat(paste0("\n", paste(rep("=", 60), collapse = ""), "\n"))
+cat("✅ VERIFICACIÓN DE RESULTADOS\n")
+cat(strrep("=", 60), "\n\n")
+
+# 9.1 Estadísticas
+cat("📊 Fracciones PFT promedio (1992-1993):\n")
+for (i in 1:nlyr(pft_means)) {
+  mean_val <- global(pft_means[[i]], "mean", na.rm = TRUE)
+  min_val <- global(pft_means[[i]], "min", na.rm = TRUE)
+  max_val <- global(pft_means[[i]], "max", na.rm = TRUE)
+  na_count <- global(pft_means[[i]], fun = function(x) sum(is.na(x)))
+  
+  cat("  ", names(pft_means)[i], ":\n")
+  cat("     Media:", round(mean_val[,1], 6), "\n")
+  cat("     Mínimo:", round(min_val[,1], 6), "\n")
+  cat("     Máximo:", round(max_val[,1], 6), "\n")
+  cat("     NAs:", na_count[,1], "\n")
+}
+
+# 9.2 Suma de fracciones
+sum_pfts <- sum(pft_means, na.rm = TRUE)
+sum_global <- global(sum_pfts, "mean", na.rm = TRUE)
+cat("\n✅ Suma de todas las fracciones PFT (media global):")
+cat("\n   Media global:", round(sum_global[,1], 6), "\n")
+
+# 9.3 Verificar clase 0
+cat("\n🔍 Verificando que clase 0 -> NA:\n")
+r_test <- rast(esa_filepath_test[1], subds = "lccs_class")
+if (REDUCIR_RESOLUCION) {
+  r_test <- agregar_raster(r_test, FACTOR_AGREGACION, fun = "modal")
+}
+vals <- values(r_test)
+if (0 %in% vals) {
+  idx_0 <- which(vals == 0)[1]
+  cat("   Píxel con clase 0 en posición:", idx_0, "\n")
+  cat("   Tree:", values(tree_mean)[idx_0], "\n")
+  cat("   Shrub:", values(shrub_mean)[idx_0], "\n")
+  cat("   Grass:", values(grass_mean)[idx_0], "\n")
+  cat("   Crop:", values(crop_mean)[idx_0], "\n")
+  cat("   NonVegetated:", values(nonveg_mean)[idx_0], "\n")
+  cat("   ✅ Todos son NA\n")
+} else {
+  cat("   No se encontró clase 0 en el raster de prueba.\n")
+}
+
+
+```
+
+
+# =============================================================================
+# 10. VISUALIZAR
+# =============================================================================
+```{r}
+# Set layout and outer margins
+par(mfrow = c(2, 3), oma = c(0, 0, 3, 0))
+
+for (i in 1:nlyr(pft_means)) {
+  plot(pft_means[[i]],
+       main = paste(names(pft_means)[i], "(1992-1993)"),
+       col = hcl.colors(100, "RdPu", rev = TRUE))
+}
+
+plot(sum_pfts,
+     main = "PFT sum",
+     col = hcl.colors(100, "RdPu", rev = TRUE))
+
+# Add an overall title
+mtext("Forkel et al. Poulter translation",
+      outer = TRUE,
+      cex = 1,
+      font = 1)
+
+# Reset graphics parameters
+par(mfrow = c(1, 1))
+```
+
+
+
+```{r}
+plot(pft_means$Tree,
+     main = "Tree (1992–1993) Wei translation",
+     col = hcl.colors(100, "Reds3", rev = TRUE))
+```
+
