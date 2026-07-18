@@ -1,0 +1,408 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-06-24"
+---
+
+
+```{r}
+# Load and prepare land polygon for South America
+land_polyg <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
+) |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-118, -33, -55, 32)) |>
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg)
+```
+
+
+```{r}
+# =============================================================================
+# CONFIGURACIÓN INICIAL
+# =============================================================================
+
+# --- OPCIÓN DE RESOLUCIÓN ---
+REDUCIR_RESOLUCION <- TRUE   # Cambia a FALSE para producción
+FACTOR_AGREGACION <- 20      # Ajusta según necesidad
+```
+
+
+
+```{r}
+# =============================================================================
+# Load required packages
+# =============================================================================
+library(terra)
+library(tidyverse)
+library(tidyterra)
+library(stringr)
+```
+
+
+
+```{r}
+# =============================================================================
+# 1. Definir la conversión PFT (tabla Poulter)
+# =============================================================================
+poulter <- list(
+  "10"  = list(Crop = 0.90, Grass = 0.10),
+  "11"  = list(Crop = 0.90, Grass = 0.10),
+  "12"  = list(Crop = 0.30, Shrub = 0.70),
+  "20"  = list(Crop = 1),
+  "30"  = list(Tree = 0.10, Shrub = 0.15, Grass = 0.60, Crop = 0.15),
+  "40"  = list(Tree = 0.15, Shrub = 0.35, Grass = 0.30, Crop = 0.20),
+  "50"  = list(Tree = 0.90, Shrub = 0.10),
+  "60"  = list(Tree = 0.50, Shrub = 0.20, Grass = 0.30),
+  "61"  = list(Tree = 0.70, Shrub = 0.15, Grass = 0.15),
+  "62"  = list(Tree = 0.30, Shrub = 0.25, Grass = 0.45),
+  "70"  = list(Tree = 0.70, Shrub = 0.15, Grass = 0.15),
+  "71"  = list(Tree = 0.70, Shrub = 0.15, Grass = 0.15),
+  "72"  = list(Tree = 0.30, Shrub = 0.25, Grass = 0.45),
+  "80"  = list(Tree = 0.50, Shrub = 0.20, Grass = 0.30),
+  "81"  = list(Tree = 0.70, Shrub = 0.15, Grass = 0.15),
+  "82"  = list(Tree = 0.30, Shrub = 0.25, Grass = 0.45),
+  "90"  = list(Tree = 0.60, Shrub = 0.15, Grass = 0.25),
+  "100" = list(Tree = 0.40, Shrub = 0.20, Grass = 0.40),
+  "110" = list(Tree = 0.20, Shrub = 0.20, Grass = 0.60),
+  "120" = list(Shrub = 0.60, Grass = 0.40),
+  "121" = list(Shrub = 0.60, Grass = 0.40),
+  "122" = list(Shrub = 0.60, Grass = 0.40),
+  "130" = list(Grass = 1),
+  "140" = list(Grass = 1),
+  "150" = list(Tree = 0.10, Shrub = 0.10, Grass = 0.30, NonVegetated = 0.50),
+  "152" = list(Shrub = 0.20, Grass = 0.30, NonVegetated = 0.50),
+  "153" = list(Grass = 0.50, NonVegetated = 0.50),
+  "160" = list(Tree = 0.75, Grass = 0.25),
+  "170" = list(Tree = 0.75, Shrub = 0.25),
+  "180" = list(Shrub = 0.40, Grass = 0.60),
+  "190" = list(NonVegetated = 1),
+  "200" = list(NonVegetated = 1),
+  "201" = list(NonVegetated = 1),
+  "202" = list(NonVegetated = 1),
+  "210" = list(NonVegetated = 1),
+  "220" = list(NonVegetated = 1)
+)
+```
+
+
+
+
+```{r}
+# =============================================================================
+# 2. Preparar lookups y clases válidas (SOLO para Tree)
+# =============================================================================
+valid_classes <- as.integer(names(poulter))
+
+pft_names <- c("Tree")  # <--- SOLO Tree
+
+# Inicializar lookups SOLO para Tree
+lookups <- setNames(lapply(pft_names, function(p) rep(0, 256)), pft_names)
+
+get_frac <- function(lst, key) if (key %in% names(lst)) lst[[key]] else 0
+
+for (lc_class in names(poulter)) {
+  idx <- as.integer(lc_class) + 1
+  frac_list <- poulter[[lc_class]]
+  for (pft in pft_names) {
+    lookups[[pft]][idx] <- get_frac(frac_list, pft)
+  }
+}
+
+# Verificar que Tree tenga valores > 0 en las clases correctas
+cat("Clases con Tree > 0:\n")
+tree_classes <- which(lookups[["Tree"]] > 0) - 1  # -1 porque R es 1-indexed
+print(tree_classes)
+
+```
+
+
+```{r}
+# =============================================================================
+# 3. Función de reclasificación (SOLO Tree)
+# =============================================================================
+reclassify_pft <- function(raster_obj, lookup, valid_classes) {
+  from_to <- cbind(valid_classes, lookup[valid_classes + 1])
+  classify(raster_obj, rcl = from_to, others = NA)
+}
+```
+
+
+
+
+```{r}
+# =============================================================================
+# 4. Función para reducir resolución
+# =============================================================================
+agregar_raster <- function(raster_obj, factor, fun = "modal") {
+  aggregate(raster_obj, fact = factor, fun = modal, na.rm = TRUE)
+}
+
+```
+
+
+
+```{r}
+# =============================================================================
+# 5. Lista de archivos (1992-1993 para prueba)
+# =============================================================================
+esa_filepath <- list.files(
+  path = "C:/Copernicus_Land_Cover/LATAM_LCCS_1992_to_2022/",
+  pattern = "\\.nc$",
+  full.names = TRUE
+)
+
+esa_filepath_test <- esa_filepath[grepl("-(1992|1993)-", esa_filepath)]
+
+cat("\n📁 Archivos seleccionados:\n")
+print(basename(esa_filepath_test))
+
+n_years <- length(esa_filepath_test)
+```
+
+
+```{r}
+# =============================================================================
+# 6. Mostrar configuración
+# =============================================================================
+cat(paste0("\n", paste(rep("=", 60), collapse = ""), "\n"))
+cat("⚙️  CONFIGURACIÓN ACTUAL\n")
+cat(strrep("=", 60), "\n")
+cat("  PFT objetivo        : 🌳 Tree\n")
+cat("  Reducir resolución  :", ifelse(REDUCIR_RESOLUCION, "✅ SÍ", "❌ NO"), "\n")
+if (REDUCIR_RESOLUCION) {
+  cat("  Factor agregación   :", FACTOR_AGREGACION, "\n")
+  cat("  Resolución aprox.   :", 
+      round(0.002777 * FACTOR_AGREGACION * 110, 2), "km\n")
+}
+cat("  Años a procesar     :", n_years, "\n")
+cat(strrep("=", 60), "\n\n")
+```
+
+
+```{r}
+# =============================================================================
+# 7. PROCESAR AÑOS (SOLO Tree)
+# =============================================================================
+cat("📊 Procesando", n_years, "años...\n")
+
+# Inicializar acumulador SOLO para Tree
+sum_tree <- NULL
+
+for (i in seq_along(esa_filepath_test)) {
+  year <- as.numeric(str_extract(basename(esa_filepath_test[i]), "\\d{4}"))
+  cat("\n  📅 Procesando año", year, "...\n")
+  
+  # Leer raster
+  r <- rast(esa_filepath_test[i], subds = "lccs_class")
+  
+  cat("     Resolución original:", res(r)[1], "° x", res(r)[2], "°\n")
+  cat("     Dimensiones originales:", nrow(r), "x", ncol(r), "\n")
+  
+  # Reducir resolución si está activado
+  if (REDUCIR_RESOLUCION) {
+    cat("     🔽 Reduciendo resolución (factor =", FACTOR_AGREGACION, ")...\n")
+    r <- agregar_raster(r, FACTOR_AGREGACION, fun = "modal")
+    cat("     Resolución agregada:", res(r)[1], "° x", res(r)[2], "°\n")
+    cat("     Dimensiones agregadas:", nrow(r), "x", ncol(r), "\n")
+  } else {
+    cat("     ✅ Usando resolución original\n")
+  }
+  
+  # Reclasificar a Tree PFT
+  cat("     Extrayendo fracción de Tree...\n")
+  tree_i <- reclassify_pft(r, lookups[["Tree"]], valid_classes)
+  
+  # Acumular
+  if (is.null(sum_tree)) {
+    sum_tree <- tree_i
+  } else {
+    sum_tree <- sum_tree + tree_i
+  }
+  
+  rm(r, tree_i)
+  gc()
+}
+```
+
+
+
+
+```{r}
+
+
+# =============================================================================
+# 8. Calcular promedio de Tree
+# =============================================================================
+cat("\n📊 Calculando promedio de Tree (1992-1993)...\n")
+
+tree_mean <- sum_tree / n_years
+names(tree_mean) <- "Tree"
+
+# =============================================================================
+# 9. VERIFICACIÓN
+# =============================================================================
+cat(paste0("\n", paste(rep("=", 60), collapse = ""), "\n"))
+cat("✅ VERIFICACIÓN DE RESULTADOS\n")
+cat(strrep("=", 60), "\n\n")
+
+# Estadísticas de Tree
+mean_val <- global(tree_mean, "mean", na.rm = TRUE)
+min_val <- global(tree_mean, "min", na.rm = TRUE)
+max_val <- global(tree_mean, "max", na.rm = TRUE)
+na_count <- global(tree_mean, fun = function(x) sum(is.na(x)))
+
+cat("🌳 Tree PFT (1992-1993 promedio):\n")
+cat("   Media:", round(mean_val[,1], 6), "\n")
+cat("   Mínimo:", round(min_val[,1], 6), "\n")
+cat("   Máximo:", round(max_val[,1], 6), "\n")
+cat("   NAs:", na_count[,1], "\n")
+
+# =============================================================================
+# 10. VISUALIZAR
+# =============================================================================
+plot(tree_mean, 
+     main = "Tree PFT (1992-1993 promedio)",
+     col = hcl.colors(100, "Greens", rev = TRUE))
+
+```
+
+
+```{r}
+modern_pollen <- readRDS("H:/Mi unidad/Research/Final_LATAM_climate_reconstruction/Input_for_reconstruction/updated_modern_dataset_climate_hill.rds")
+```
+
+
+
+```{r}
+# =============================================================================
+# EXTRAER TREE PFT EN PUNTOS DE MUESTREO
+# =============================================================================
+
+# 1. Preparar puntos de muestreo
+sampling_points <- modern_pollen %>%
+  select(id_sample, latitude, longitude) %>%
+  filter(!is.na(latitude), !is.na(longitude)) %>%
+  distinct(id_sample, .keep_all = TRUE)
+
+# 2. Crear matriz de coordenadas (longitud, latitud)
+coords_matrix <- as.matrix(sampling_points[, c("longitude", "latitude")])
+
+# 3. Extraer usando terra::extract()
+tree_values <- terra::extract(tree_mean, coords_matrix)
+
+# Extraer usando pluck (más seguro que índices)
+tree_vector <- tree_values %>% 
+  as.data.frame() %>%
+  pluck(1)  # Extrae la primera columna
+
+# 5. Crear dataframe final
+# IMPORTANTE: tree_values tiene dos columnas: ID y Tree
+# Si solo tiene una columna, significa que no incluyó ID automáticamente
+# En ese caso, la columna es directamente el valor de Tree
+
+# Dado que tree_values tiene una sola columna, es directo:
+resultados_tree <- sampling_points %>%
+  mutate(Tree_PFT = tree_vector) %>%  # Usar corchetes
+  left_join(modern_pollen, by=c("id_sample", "latitude", "longitude"))
+
+
+
+
+plot_sampling <- ggplot() +
+  geom_sf(data = land_polyg, fill = "white") +
+  geom_point(
+    data = resultados_tree,
+    aes(longitude, latitude, fill = Tree_PFT),
+    size = 1.8,
+    shape = 21
+  ) +
+  scale_fill_gradientn(
+    colours = hcl.colors(100, "Greens", rev = TRUE),
+    limits = c(0, 1),
+    name = "Tree fraction"
+  ) +
+  scale_y_continuous(expand = c(0, 0))
+
+plot_sampling
+```
+
+
+```{r}
+# =============================================================================
+# CONVERTIR RASTER A DATAFRAME (para ggplot2)
+# =============================================================================
+
+# 1. Convertir SpatRaster a data.frame con coordenadas
+tree_df <- as.data.frame(tree_mean, xy = TRUE)
+
+# 2. Ver estructura
+glimpse(tree_df)
+# Debería tener: x, y, Tree
+
+# 3. Eliminar NAs (opcional, para mejorar el plotting)
+#tree_df <- tree_df %>% filter(!is.na(Tree))
+
+
+
+
+
+ggplot() + geom_tile(data = tree_df, aes(x = x, y = y, fill = Tree)) + jcolors::scale_fill_jcolors_contin(palette = "pal2") + geom_sf(data = land_polyg, fill = "transparent", colour = "white", size = 0.5) + labs( title = "Tree PFT (1992-1993 promedio)", x = "Longitud", y = "Latitud", fill = "Tree fraction" ) + theme_minimal()
+
+ggplot() +
+  geom_sf(data = land_polyg, fill = "white") +
+  geom_point(
+    data = resultados_tree,
+    aes(longitude, latitude, fill = Tree_PFT),
+    size = 1.8,
+    shape = 21
+  ) +
+  scale_fill_gradientn(
+    colours = hcl.colors(100, "Greens", rev = TRUE),
+    limits = c(0, 1),
+    name = "Tree fraction"
+  ) +
+  scale_y_continuous(expand = c(0, 0))
+
+```
+
+
+```{r}
+
+ggplot() +
+  geom_sf(
+    data = land_polyg,
+    fill = "transparent",
+    colour = "black",
+    size = 0.5
+  ) +
+  geom_point(
+    data = resultados_tree,
+    aes(longitude, latitude, fill = Tree_PFT),
+    size = 1.8,
+    shape = 21
+  ) +
+  jcolors::scale_fill_jcolors_contin(
+    palette = "pal2"
+  ) +
+  labs(
+    title = "Tree PFT (1992-1993 promedio)",
+    x = "Longitud",
+    y = "Latitud",
+    fill = "Tree fraction"
+  ) +
+  coord_sf() +
+  theme_minimal()
+
+```
+
+
+```{r}
+
+# 5. Guardar
+write.csv(tree_df, "G:/Mi unidad/Research/Tree_cover/", row.names = FALSE)
+
+```
+
