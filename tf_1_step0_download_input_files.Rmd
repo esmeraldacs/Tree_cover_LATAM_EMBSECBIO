@@ -1382,3 +1382,289 @@ if (length(latam_files) > 0) {
 }
 ```
 
+
+Para Europa
+```{r}
+# Procesar todos los años para Europa
+message("\n" , rep("=", 80), sep = "")
+message("🌍 INICIANDO PROCESAMIENTO DE EUROPA")
+message(rep("=", 80), sep = "")
+
+eur_log <- process_region_all_years(
+  region = "Europa",
+  tif_dir = tif_dir,
+  output_dir = eur_processed_dir,
+  years = 2000:2021,
+  overwrite = FALSE
+)
+
+# Ver archivos generados
+eur_files <- list.files(eur_processed_dir, pattern = "\\.tif$")
+message(paste("\n📂 Archivos generados para Europa:", length(eur_files)))
+if (length(eur_files) > 0) {
+  message("  Años:", paste(sort(as.integer(sub(".*_(\\d{4})\\.tif", "\\1", eur_files))), collapse = ", "))
+}
+```
+
+
+
+
+```{r}
+# Verificación final de todo el dataset
+message("\n" , rep("=", 60), sep = "")
+message("🎯 DATASET COMPLETO - VERIFICACIÓN FINAL")
+message(rep("=", 60), sep = "")
+
+# Directorios
+base_dir <- "C:/Datasets_Tree_Cover/Fractional_Tree_Cover_Liu2024"
+processed_dir <- file.path(base_dir, "processed")
+latam_dir <- file.path(processed_dir, "Latinoamerica")
+eur_dir <- file.path(processed_dir, "Europa")
+
+# Latinoamérica
+if (dir.exists(latam_dir)) {
+  latam_files <- list.files(latam_dir, pattern = "\\.tif$")
+  latam_size <- round(sum(file.info(file.path(latam_dir, latam_files))$size) / 1024^3, 2)
+  latam_years <- sort(as.integer(sub(".*_(\\d{4})\\.tif", "\\1", latam_files)))
+  
+  message("\n🌎 LATINOAMÉRICA:")
+  message(paste("  Archivos:", length(latam_files), "/ 22"))
+  message(paste("  Años:", paste(latam_years[1:5], collapse = ", "), "...", latam_years[length(latam_years)]))
+  message(paste("  Espacio:", latam_size, "GB"))
+  if (length(latam_files) == 22) message("  ✅ Completo")
+} else {
+  message("❌ Directorio Latinoamérica no existe")
+}
+
+# Europa
+if (dir.exists(eur_dir)) {
+  eur_files <- list.files(eur_dir, pattern = "\\.tif$")
+  eur_size <- round(sum(file.info(file.path(eur_dir, eur_files))$size) / 1024^3, 2)
+  eur_years <- sort(as.integer(sub(".*_(\\d{4})\\.tif", "\\1", eur_files)))
+  
+  message("\n🌍 EUROPA:")
+  message(paste("  Archivos:", length(eur_files), "/ 22"))
+  message(paste("  Años:", paste(eur_years[1:5], collapse = ", "), "...", eur_years[length(eur_years)]))
+  message(paste("  Espacio:", eur_size, "GB"))
+  if (length(eur_files) == 22) message("  ✅ Completo")
+} else {
+  message("❌ Directorio Europa no existe")
+}
+
+# Total
+if (exists("latam_files") && exists("eur_files")) {
+  total_files <- length(latam_files) + length(eur_files)
+  total_size <- latam_size + eur_size
+  message(paste("\n📊 TOTAL GENERAL:"))
+  message(paste("  Archivos:", total_files, "/ 44"))
+  message(paste("  Espacio total:", round(total_size, 2), "GB"))
+  if (total_files == 44) message("  🎉 ¡Dataset completo!")
+}
+```
+
+
+
+Verificacion de todo el dataset
+```{r}
+# Verificación final de todo el dataset
+message("\n" , rep("=", 60), sep = "")
+message("🎯 DATASET COMPLETO - VERIFICACIÓN FINAL")
+message(rep("=", 60), sep = "")
+
+# Directorios
+base_dir <- "C:/Datasets_Tree_Cover/Fractional_Tree_Cover_Liu2024"
+processed_dir <- file.path(base_dir, "processed")
+latam_dir <- file.path(processed_dir, "Latinoamerica")
+eur_dir <- file.path(processed_dir, "Europa")
+
+# Latinoamérica
+if (dir.exists(latam_dir)) {
+  latam_files <- list.files(latam_dir, pattern = "\\.tif$")
+  latam_size <- round(sum(file.info(file.path(latam_dir, latam_files))$size) / 1024^3, 2)
+  latam_years <- sort(as.integer(sub(".*_(\\d{4})\\.tif", "\\1", latam_files)))
+  
+  message("\n🌎 LATINOAMÉRICA:")
+  message(paste("  Archivos:", length(latam_files), "/ 22"))
+  message(paste("  Años:", paste(latam_years[1:5], collapse = ", "), "...", latam_years[length(latam_years)]))
+  message(paste("  Espacio:", latam_size, "GB"))
+  if (length(latam_files) == 22) message("  ✅ Completo")
+} else {
+  message("❌ Directorio Latinoamérica no existe")
+}
+
+# Europa
+if (dir.exists(eur_dir)) {
+  eur_files <- list.files(eur_dir, pattern = "\\.tif$")
+  eur_size <- round(sum(file.info(file.path(eur_dir, eur_files))$size) / 1024^3, 2)
+  eur_years <- sort(as.integer(sub(".*_(\\d{4})\\.tif", "\\1", eur_files)))
+  
+  message("\n🌍 EUROPA:")
+  message(paste("  Archivos:", length(eur_files), "/ 22"))
+  message(paste("  Años:", paste(eur_years[1:5], collapse = ", "), "...", eur_years[length(eur_years)]))
+  message(paste("  Espacio:", eur_size, "GB"))
+  if (length(eur_files) == 22) message("  ✅ Completo")
+} else {
+  message("❌ Directorio Europa no existe")
+}
+
+# Total
+if (exists("latam_files") && exists("eur_files")) {
+  total_files <- length(latam_files) + length(eur_files)
+  total_size <- latam_size + eur_size
+  message(paste("\n📊 TOTAL GENERAL:"))
+  message(paste("  Archivos:", total_files, "/ 44"))
+  message(paste("  Espacio total:", round(total_size, 2), "GB"))
+  if (total_files == 44) message("  🎉 ¡Dataset completo!")
+}
+```
+
+Repreoyectando rasters
+Paso 1: Definir directorios para rasters reproyectados
+```{r}
+# Directorios base
+base_dir <- "C:/Datasets_Tree_Cover/Fractional_Tree_Cover_Liu2024"
+processed_dir <- file.path(base_dir, "processed")
+
+# Directorios originales
+latam_original <- file.path(processed_dir, "Latinoamerica")
+eur_original <- file.path(processed_dir, "Europa")
+
+# Directorios para rasters reproyectados
+latam_reproj <- file.path(processed_dir, "Latinoamerica_reproj")
+eur_reproj <- file.path(processed_dir, "Europa_reproj")
+
+# Crear directorios
+if (!dir.exists(latam_reproj)) {
+  dir.create(latam_reproj, recursive = TRUE)
+  message(paste("✅ Directorio creado:", latam_reproj))
+}
+
+if (!dir.exists(eur_reproj)) {
+  dir.create(eur_reproj, recursive = TRUE)
+  message(paste("✅ Directorio creado:", eur_reproj))
+}
+```
+
+Paso 2: Definir la proyección de destino
+¿Qué proyección quieres usar?
+Opción A: WGS84 (lat/lon) - EPSG:4326
+Opción B: Proyección para Sudamérica (South America Albers Equal Area) - EPSG:5880
+Opción C: Proyección para Europa (ETRS89 / LAEA Europe) - EPSG:3035
+```{r}
+target_crs <- "EPSG:4326"
+message("🌐 Proyección de destino: WGS84 (lat/lon)")
+```
+
+
+
+```{r}
+# Función para reproyectar un raster y guardarlo
+reproject_raster <- function(input_file, output_dir, target_crs, region_name, year, overwrite = FALSE) {
+  
+  # Verificar que el archivo existe
+  if (!file.exists(input_file)) {
+    message(paste("  ❌ Archivo no existe:", basename(input_file)))
+    return(FALSE)
+  }
+  
+  # Nombre del archivo de salida
+  output_file <- file.path(output_dir, paste0("GLOBMAP_FTC_", region_name, "_", year, "_reproj.tif"))
+  
+  # Verificar si ya existe
+  if (file.exists(output_file) && !overwrite) {
+    message(paste("  ✅ Ya existe:", basename(output_file)))
+    return(TRUE)
+  }
+  
+  message(paste("  📖 Leyendo:", basename(input_file)))
+  
+  tryCatch({
+    # Cargar raster
+    r <- rast(input_file)
+    
+    # Verificar CRS actual
+    current_crs <- crs(r)
+    message(paste("    CRS original:", current_crs))
+    
+    # Reprojectar
+    message(paste("  🔄 Reprojectando a:", target_crs))
+    r_reproj <- project(r, target_crs, method = "bilinear")
+    
+    # Guardar
+    message(paste("  💾 Guardando:", basename(output_file)))
+    writeRaster(r_reproj, output_file, overwrite = TRUE, gdal = "COMPRESS=LZW")
+    
+    # Verificar
+    if (file.exists(output_file)) {
+      size_mb <- round(file.info(output_file)$size / 1024^2, 2)
+      message(paste("  ✅ Guardado exitosamente (", size_mb, "MB)"))
+      return(TRUE)
+    } else {
+      message(paste("  ❌ Error al guardar"))
+      return(FALSE)
+    }
+    
+  }, error = function(e) {
+    message(paste("  ❌ Error:", e$message))
+    return(FALSE)
+  })
+}
+```
+
+
+Paso 5: Reprojectar todos los años para Latinoamérica
+```{r}
+message("\n" , rep("=", 80), sep = "")
+message("🌎 REPROYECTANDO LATINOAMÉRICA")
+message(rep("=", 80), sep = "")
+
+# Listar archivos
+latam_files <- list.files(latam_original, pattern = "\\.tif$", full.names = TRUE)
+message(paste("📂 Archivos a reproyectar:", length(latam_files)))
+
+# Reprojectar cada año
+latam_results <- data.frame(
+  year = integer(),
+  success = logical(),
+  size_mb = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (i in 1:length(latam_files)) {
+  file_path <- latam_files[i]
+  year <- as.integer(sub(".*_(\\d{4})\\.tif", "\\1", basename(file_path)))
+  
+  message(paste("\n📅", i, "/", length(latam_files), "- Año", year))
+  
+  success <- reproject_raster(
+    input_file = file_path,
+    output_dir = latam_reproj,
+    target_crs = target_crs,
+    region_name = "Latinoamerica",
+    year = year,
+    overwrite = FALSE
+  )
+  
+  if (success) {
+    output_file <- file.path(latam_reproj, paste0("GLOBMAP_FTC_Latinoamerica_", year, "_reproj.tif"))
+    size_mb <- round(file.info(output_file)$size / 1024^2, 2)
+    latam_results <- rbind(latam_results, 
+                          data.frame(year = year, success = TRUE, size_mb = size_mb))
+  } else {
+    latam_results <- rbind(latam_results, 
+                          data.frame(year = year, success = FALSE, size_mb = NA))
+  }
+}
+
+message("\n📊 Resumen Latinoamérica:")
+message(paste("  Exitosos:", sum(latam_results$success), "/", nrow(latam_results)))
+if (sum(latam_results$success) > 0) {
+  total_size <- round(sum(latam_results$size_mb[latam_results$success], na.rm = TRUE) / 1024, 2)
+  message(paste("  Espacio total:", total_size, "GB"))
+}
+```
+
+
+
+
+
