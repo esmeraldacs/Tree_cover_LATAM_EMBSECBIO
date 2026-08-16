@@ -1,0 +1,816 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-06-24"
+---
+
+Este es el codigo para transformar de clasesPoulter schemme
+
+```{r}
+library(terra)
+library(tidyverse)
+library(tidyterra)
+#library(stringr)
+library(sf)
+```
+
+Condigo para dos regiones simulataneas
+
+```{r}
+# Load and prepare land polygon for South America
+land_polyg_latam <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
+) |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-118, -33, -55, 32)) |>
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_latam)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_eur <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-20, 62, 29, 75)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_eur)
+```
+
+
+
+
+```{r}
+# ---- BLOQUE 1: PREPARACIÓN ----
+# ---- 1.1 Cargar datos de polen LATAM ----
+modern_pollen_latam <- readRDS("C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Input/updated_modern_dataset_climate_hill.rds") |>
+  select(-hill_n2, -mapr, -mi, -gdd0, -mat, -mtco, -mtwa, -alpha, -age_bp) |>
+  mutate(site_type = case_when(is.na(site_type) & entity_type == "surface sample" ~ "soil", T ~ site_type)) |>
+  mutate(entity_name = case_when(is.na(entity_name) ~ id_sample, T ~ entity_name))
+
+n_muestras_latam <- n_distinct(modern_pollen_latam$id_sample)
+
+modern_pollen_latam <- modern_pollen_latam |>
+  pivot_longer(
+    cols = -c(id_sample, entity_name, latitude, longitude,
+              elevation, site_type, entity_type),
+    names_to = "species",
+    values_to = "pollen"
+  ) |>
+  filter(pollen > 0) |>
+  group_by(species) |>
+  filter(n_distinct(id_sample) >= 0.05 * n_muestras_latam) |>
+  ungroup() |>
+  group_by(id_sample) |>
+  mutate(pollen = pollen / sum(pollen)) |>
+  ungroup() |>
+  pivot_wider(
+    names_from = species,
+    values_from = pollen,
+    values_fill = 0
+  )
+
+# ---- 1.2 Cargar datos de polen EUROPA ----
+modern_pollen_europe <- read.csv("C:/Databases/SMPDSv3/SMPDSv3_metadata.csv") |>
+  filter(between(latitude, 29, 75), between(longitude, -20, 62)) |>
+  select(ID_SAMPLE, entity_name, latitude, longitude, elevation, site_type, entity_type) |>
+  left_join(read.csv("C:/Databases/SMPDSv3/SMPDSv3_amalgamated.csv"), by = "ID_SAMPLE") |>
+  rename(id_sample = ID_SAMPLE)
+
+n_muestras_europe <- n_distinct(modern_pollen_europe$id_sample)
+
+modern_pollen_europe <- modern_pollen_europe |>
+  pivot_longer(
+    cols = -c(id_sample, entity_name, latitude, longitude, elevation, site_type, entity_type),
+    names_to = "species",
+    values_to = "pollen"
+  ) |>
+  filter(pollen > 0) |>
+  group_by(species) |>
+  filter(n_distinct(id_sample) >= 0.05 * n_muestras_europe) |>
+  ungroup() |>
+  group_by(id_sample) |>
+  mutate(pollen = pollen / sum(pollen)) |>
+  ungroup() |>
+  pivot_wider(
+    names_from = species,
+    values_from = pollen,
+    values_fill = 0
+  )
+
+
+
+
+
+
+
+
+
+promediar_inteligentemente <- function(datos) {
+  
+  # Identificar columnas NO numéricas (metadata) que queremos preservar
+  columnas_no_numericas <- c("id_sample", "entity_name", "site_type", "entity_type")
+  
+  datos_promediados <- datos %>%
+    group_by(latitude, longitude) %>%
+    summarise(
+      # 1. Promediar TODAS las columnas numéricas (especies + elevation)
+      across(where(is.numeric), ~ mean(., na.rm = TRUE)),
+      
+      # 2. id_sample: combinar todos los IDs
+      id_sample = paste(unique(id_sample), collapse = " | "),
+      
+      # 3. entity_name: seleccionar el primer valor no-NA (o el más común)
+      entity_name = {
+        nombres <- unique(na.omit(entity_name))
+        if (length(nombres) > 0) {
+          # Si hay varios, tomar el más frecuente
+          tabla <- table(entity_name[!is.na(entity_name)])
+          names(sort(tabla, decreasing = TRUE))[1]
+        } else {
+          NA_character_
+        }
+      },
+      
+      # 4. site_type: valor más frecuente
+      site_type = {
+        valores <- unique(na.omit(site_type))
+        if (length(valores) > 0) {
+          tabla <- table(site_type[!is.na(site_type)])
+          names(sort(tabla, decreasing = TRUE))[1]
+        } else {
+          NA_character_
+        }
+      },
+      
+      # 5. entity_type: valor más frecuente
+      entity_type = {
+        valores <- unique(na.omit(entity_type))
+        if (length(valores) > 0) {
+          tabla <- table(entity_type[!is.na(entity_type)])
+          names(sort(tabla, decreasing = TRUE))[1]
+        } else {
+          NA_character_
+        }
+      },
+      
+      # 6. Número de muestras promediadas (metadata útil)
+      n_muestras_promediadas = n(),
+      
+      .groups = "drop"
+    )
+  
+  return(datos_promediados)
+}
+
+# Aplicar
+modern_pollen_latam <- promediar_inteligentemente(modern_pollen_latam)
+modern_pollen_europe <- promediar_inteligentemente(modern_pollen_europe)
+
+
+modern_pollen_latam <- modern_pollen_latam |> 
+  select(id_sample, entity_name, latitude, longitude, elevation,site_type, entity_type, everything()) |>
+  select(-n_muestras_promediadas)
+
+modern_pollen_europe <- modern_pollen_europe |> 
+  select(id_sample, entity_name, latitude, longitude, elevation,site_type, entity_type, everything()) |>
+  select(-n_muestras_promediadas)
+
+
+
+
+
+# ---- 1.3 Definir palabras clave para clasificación ----
+keywords_eliminar <- c("fluvial", "marine", "estuarine")
+keywords_lake <- c("lake", "lacustrine", "lagoon", "ephemeral", "palaeolake")
+keywords_medium <- c("bog", "fen", "swamp", "mire", "peat", "marsh")
+keywords_small <- c("moss", "lichen", "soil", "litter", "pollen trap", 
+                    "hollow", "excavation", "archaeological", "cave")
+
+# ---- 1.4 Función para clasificar muestras ----
+classify_pollen_samples <- function(df) {
+  df %>%
+    mutate(
+      full_desc = paste(site_type, entity_type, sep = " "),
+      full_desc = str_replace_na(full_desc, replacement = "unknown")
+    ) %>%
+    mutate(
+      remove_me = str_detect(full_desc, regex(paste(keywords_eliminar, collapse = "|"), ignore_case = TRUE))
+    ) %>%
+    mutate(
+      sample_category = case_when(
+        remove_me == TRUE ~ "REMOVED",
+        str_detect(full_desc, regex(paste(keywords_lake, collapse = "|"), ignore_case = TRUE)) ~ "LAKE",
+        str_detect(full_desc, regex(paste(keywords_medium, collapse = "|"), ignore_case = TRUE)) ~ "TERR_MEDIUM",
+        str_detect(full_desc, regex(paste(keywords_small, collapse = "|"), ignore_case = TRUE)) ~ "TERR_SMALL",
+        str_detect(full_desc, regex("terrestrial", ignore_case = TRUE)) ~ "TERR_MEDIUM",
+        TRUE ~ "NOT_KNOWN"
+      )
+    ) %>%
+    select(-full_desc, -remove_me)
+}
+
+# ---- 1.5 Clasificar y guardar ----
+modern_pollen_latam_class <- classify_pollen_samples(modern_pollen_latam)
+modern_pollen_europe_class <- classify_pollen_samples(modern_pollen_europe)
+
+
+modern_pollen_latam_class <- modern_pollen_latam_class |>
+  select(id_sample, entity_name, latitude, longitude, elevation, sample_category, everything()) |>
+  select(-site_type, -entity_type)
+
+
+modern_pollen_europe_class <- modern_pollen_europe_class |>
+  select(id_sample, entity_name, latitude, longitude, elevation, sample_category, everything()) |>
+  select(-site_type, -entity_type)
+```
+
+
+```{r}
+saveRDS(modern_pollen_latam_class, "Data/Input/modern_pollen_latam_class.rds")
+
+saveRDS(modern_pollen_europe_class, "Data/Input/modern_pollen_europe_class.rds")
+```
+
+
+```{r}
+modern_pollen_latam_class <- readRDS("Data/Input/modern_pollen_latam_class.rds")
+
+modern_pollen_europe_class <- readRDS("Data/Input/modern_pollen_europe_class.rds")
+```
+
+
+
+```{r}
+# ---- 1.6 Definir rutas de rasters ----
+
+archivos_latam <- list.files(
+  "C:/Datasets_Tree_Cover/Fractional_Tree_Cover_Liu2024/processed/Latinoamerica", 
+  pattern = "GLOBMAP_FTC_Latinoamerica_\\d{4}\\.tif$", 
+  full.names = TRUE)
+
+archivos_europa <- list.files(
+  "C:/Datasets_Tree_Cover/Fractional_Tree_Cover_Liu2024/processed/Europa", 
+  pattern = "GLOBMAP_FTC_Europa_\\d{4}\\.tif$", 
+  full.names = TRUE)
+```
+
+
+
+
+
+
+```{r}
+# ---- BLOQUE 1: PROMEDIAR RASTERS POR REGIÓN ----
+# Esto se ejecuta UNA SOLA VEZ al inicio
+
+promediar_rasters <- function(archivos, region_nombre) {
+  
+  cat("📊 Promediando", length(archivos), "rasters para", region_nombre, "...\n")
+  
+  # Cargar el primer raster
+  raster_promedio <- rast(archivos[1])
+  
+  # Sumar todos los rasters (usando un loop para no sobrecargar memoria)
+  for (i in 2:length(archivos)) {
+    cat("  Sumando año", i, "/", length(archivos), "...\n")
+    raster_promedio <- raster_promedio + rast(archivos[i])
+  }
+  
+  # Dividir por el número de años
+  raster_promedio <- raster_promedio / length(archivos)
+  
+  cat("✅ Raster promedio creado para", region_nombre, "\n")
+  return(raster_promedio)
+}
+
+# Crear rasters promedio para LATAM y EUROPA
+raster_promedio_latam <- promediar_rasters(archivos_latam, "LATAM")
+raster_promedio_europa <- promediar_rasters(archivos_europa, "EUROPA")
+
+# Guardar los rasters promedio (opcional, para no tener que recalcular)
+writeRaster(raster_promedio_latam, 
+            "Data/Processed/raster_promedio_LATAM.tif", 
+            overwrite = TRUE)
+
+writeRaster(raster_promedio_europa, 
+            "Data/Processed/raster_promedio_EUROPA.tif", 
+            overwrite = TRUE)
+
+```
+
+
+```{r}
+# ---- RECREAR ESCENARIOS ----
+# Definir factores (si no existen)
+factores_categoria <- tribble(
+  ~sample_category, ~factor,
+  "LAKE", 1.0,
+  "TERR_MEDIUM", 0.6,
+  "TERR_SMALL", 0.3,
+  "NOT_KNOWN", 1.0
+)
+
+# Definir radios y enfoques
+radios_base <- c(10, 12, 18, 20, 24, 30, 36, 42, 48, 50, 54, 60)
+enfoques <- c("SIN_TIPO", "CON_TIPO")
+
+# Crear tabla de escenarios
+escenarios <- expand_grid(
+  region = c("LATAM", "EUROPA"),
+  radio_km = radios_base,
+  enfoque = enfoques
+) %>%
+  mutate(nombre = paste(region, "radio", radio_km, enfoque, sep = "_"))
+
+# Verificar que se creó
+cat("✅ Escenarios creados:", nrow(escenarios), "\n")
+print(head(escenarios, 5))
+```
+
+
+  
+```{r}
+# ---- BLOQUE 2: FUNCIÓN PARA EXTRAER UN PUNTO ----
+extraer_un_punto <- function(raster, lon, lat, radio_km, factor) {
+  
+  sigma <- (radio_km * 1000 * factor) / 3
+  
+  punto_vect <- vect(cbind(lon, lat), crs = "EPSG:4326")
+  punto_proj <- project(punto_vect, crs(raster))
+  coord_centro <- crds(punto_proj)
+  x_centro <- coord_centro[1, "x"]
+  y_centro <- coord_centro[1, "y"]
+  
+  radio_max <- radio_km * 1000
+  buffer <- buffer(punto_proj, width = radio_max)
+  raster_buffer <- crop(raster, buffer)
+  
+  if (ncell(raster_buffer) == 0) return(NA_real_)
+  
+  coords_pixeles <- xyFromCell(raster_buffer, 1:ncell(raster_buffer))
+  valores_raw <- values(raster_buffer, mat = FALSE)
+  
+  if (is.vector(valores_raw)) {
+    valores_pixeles <- valores_raw
+  } else {
+    valores_pixeles <- valores_raw[, 1]
+  }
+  
+  distancias <- sqrt((coords_pixeles[, 1] - x_centro)^2 + 
+                     (coords_pixeles[, 2] - y_centro)^2)
+  pesos <- exp(-(distancias^2) / (2 * sigma^2))
+  
+  df_pixeles <- tibble(valor = valores_pixeles, peso = pesos) %>%
+    filter(!is.na(valor), peso > 0)
+  
+  if (nrow(df_pixeles) == 0) return(NA_real_)
+  
+  return(sum(df_pixeles$valor * df_pixeles$peso) / sum(df_pixeles$peso))
+}
+
+
+# ---- BLOQUE 3: FUNCIÓN PARA PROCESAR UN ESCENARIO ----
+procesar_escenario <- function(raster_promedio, df_puntos, radio_km, enfoque, 
+                               nombre_escenario) {
+  
+  cat("📊", nombre_escenario, "- Radio:", radio_km, "km |", enfoque, "\n")
+  
+  # Asignar factor según enfoque
+  if (enfoque == "SIN_TIPO") {
+    df_puntos <- df_puntos %>% mutate(factor_usado = 1.0)
+  } else {
+    df_puntos <- df_puntos %>%
+      mutate(
+        factor_usado = case_when(
+          sample_category == "LAKE" ~ 1.0,
+          sample_category == "TERR_MEDIUM" ~ 0.6,
+          sample_category == "TERR_SMALL" ~ 0.3,
+          sample_category == "NOT_KNOWN" ~ 1.0,
+          TRUE ~ 1.0
+        )
+      )
+  }
+  
+  # Extraer tree cover para cada punto (usando el raster promedio)
+  df_puntos <- df_puntos %>%
+    mutate(
+      tree_cover_promedio = map2_dbl(
+        .x = longitude,
+        .y = latitude,
+        .f = ~{
+          extraer_un_punto(
+            raster = raster_promedio,
+            lon = .x,
+            lat = .y,
+            radio_km = radio_km,
+            factor = factor_usado[which(longitude == .x & latitude == .y)[1]]
+          )
+        }
+      )
+    ) %>%
+    select(-factor_usado)
+  
+  cat("✅", nombre_escenario, "completado\n")
+  return(df_puntos)
+}
+
+
+# ---- BLOQUE 4: EJECUTAR TODOS LOS ESCENARIOS ----
+dir_resultados <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Extraction_TreeCover"
+if (!dir.exists(dir_resultados)) dir.create(dir_resultados, recursive = TRUE)
+
+setwd(dir_resultados)
+
+resultados_globales <- list()
+
+for (i in 1:nrow(escenarios)) {
+  
+  region <- escenarios$region[i]
+  radio_km <- escenarios$radio_km[i]
+  enfoque <- escenarios$enfoque[i]
+  nombre <- escenarios$nombre[i]
+  
+  cat("\n🚀", i, "/", nrow(escenarios), "-", nombre, "\n")
+  
+  # Seleccionar raster promedio y puntos según región
+  if (region == "LATAM") {
+    raster <- raster_promedio_latam
+    df_puntos <- modern_pollen_latam_class
+  } else {
+    raster <- raster_promedio_europa
+    df_puntos <- modern_pollen_europe_class
+  }
+  
+  # Procesar escenario
+  df_resultado <- procesar_escenario(
+    raster_promedio = raster,
+    df_puntos = df_puntos,
+    radio_km = radio_km,
+    enfoque = enfoque,
+    nombre_escenario = nombre
+  )
+  
+  # Guardar resultado
+  archivo_resultado <- file.path(dir_resultados, paste0("resultados_", nombre, ".rds"))
+  saveRDS(df_resultado, archivo_resultado)
+  
+  resultados_globales[[nombre]] <- df_resultado
+}
+
+cat("\n🎉 PROCESAMIENTO COMPLETADO\n")
+```
+
+
+```{r}
+
+# ---- SCRIPT OPTIMIZADO: ARCHIVOS SEPARADOS Y JOIN MÚLTIPLE (CORREGIDO) ----
+dir_resultados <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Extraction_TreeCover"
+
+# 1. Cargar metadatos completos
+modern_pollen_latam_class <- readRDS("C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Input/modern_pollen_latam_class.rds")
+modern_pollen_europe_class <- readRDS("C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Input/modern_pollen_europe_class.rds")
+
+# 2. Función para consolidar una región
+consolidar_region <- function(region, df_metadatos, dir_resultados) {
+  
+  cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+  cat("📊 Consolidando", region, "\n")
+  cat(paste(rep("=", 60), collapse = ""), "\n")
+  
+  # 2.1 Listar archivos de la región
+  patron <- paste0("resultados_", region, "_.*\\.rds$")
+  archivos <- list.files(dir_resultados, pattern = patron, full.names = TRUE)
+  
+  cat("  Archivos encontrados:", length(archivos), "\n")
+  
+  # 2.2 Cargar solo las columnas necesarias
+  resultados_limpios <- list()
+  
+  for (archivo in archivos) {
+    # Extraer nombre del escenario (CORREGIDO)
+    nombre <- basename(archivo) %>%
+      str_remove("^resultados_") %>%
+      str_remove("\\.rds$")
+    
+    # Cargar solo columnas necesarias
+    df <- readRDS(archivo) %>%
+      select(id_sample, latitude, longitude, elevation, sample_category,
+             tree_cover_promedio) %>%
+      distinct(id_sample, latitude, longitude, elevation, .keep_all = TRUE)
+    
+    resultados_limpios[[nombre]] <- df
+    cat("  ✅", nombre, "-", nrow(df), "filas únicas\n")
+  }
+  
+  # 2.3 Consolidar usando join múltiple
+  nombres <- names(resultados_limpios)
+  primer_escenario <- nombres[1]
+  
+  df_final <- resultados_limpios[[primer_escenario]] %>%
+    rename(!!primer_escenario := tree_cover_promedio)
+  
+  for (nombre in nombres[-1]) {
+    cat("  Añadiendo:", nombre, "\n")
+    
+    df_temp <- resultados_limpios[[nombre]] %>%
+      select(id_sample, latitude, longitude, elevation, tree_cover_promedio) %>%
+      rename(!!nombre := tree_cover_promedio)
+    
+    df_final <- df_final %>%
+      left_join(df_temp, 
+                by = c("id_sample", "latitude", "longitude", "elevation"),
+                relationship = "one-to-one")
+  }
+  
+  # 2.4 Añadir todas las columnas de especies
+  cat("  Añadiendo columnas de especies...\n")
+  
+  df_final <- df_metadatos %>%
+    select(-latitude, -longitude, -elevation, -sample_category) %>%
+    left_join(df_final, by = "id_sample")
+  
+  # 2.5 Reordenar
+  df_final <- df_final %>%
+    select(id_sample, entity_name, latitude, longitude, elevation, 
+           sample_category,
+           starts_with(region),
+           everything())
+  
+  cat("  ✅ Consolidación completada\n")
+  cat("  Filas:", nrow(df_final), "\n")
+  cat("  Columnas:", ncol(df_final), "\n")
+  
+  return(df_final)
+}
+
+# 3. Consolidar LATAM
+df_final_latam <- consolidar_region(
+  region = "LATAM",
+  df_metadatos = modern_pollen_latam_class,
+  dir_resultados = dir_resultados
+)
+
+# 4. Consolidar EUROPA
+df_final_europa <- consolidar_region(
+  region = "EUROPA",
+  df_metadatos = modern_pollen_europe_class,
+  dir_resultados = dir_resultados
+)
+
+# 5. Guardar archivos separados
+saveRDS(df_final_latam, file.path(dir_resultados, "df_final_LATAM_treecover.rds"))
+write_csv(df_final_latam, file.path(dir_resultados, "df_final_LATAM_treecover.csv"))
+
+saveRDS(df_final_europa, file.path(dir_resultados, "df_final_EUROPA_treecover.rds"))
+write_csv(df_final_europa, file.path(dir_resultados, "df_final_EUROPA_treecover.csv"))
+
+cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+cat("🎉 PROCESAMIENTO COMPLETADO\n")
+cat(paste(rep("=", 60), collapse = ""), "\n")
+cat("✅ LATAM:", nrow(df_final_latam), "filas,", ncol(df_final_latam), "columnas\n")
+cat("   Guardado en:", file.path(dir_resultados, "df_final_LATAM_treecover.rds"), "\n")
+cat("✅ EUROPA:", nrow(df_final_europa), "filas,", ncol(df_final_europa), "columnas\n")
+cat("   Guardado en:", file.path(dir_resultados, "df_final_EUROPA_treecover.rds"), "\n")
+
+# Mostrar nombres de los primeros escenarios para verificar
+cat("\n📋 Nombres de escenarios (primeros 5):\n")
+print(head(names(df_final_latam)[grep("LATAM", names(df_final_latam))], 5))
+
+
+```
+
+
+
+```{r}
+df_final_latam <- readRDS("Data/Processed/Extraction_TreeCover/df_final_LATAM_treecover.rds")
+
+df_final_europa <- readRDS("Data/Processed/Extraction_TreeCover/df_final_EUROPA_treecover.rds")
+
+```
+
+
+
+
+```{r}
+
+
+ggplot() +
+  geom_point(data = df_final_latam |> select(id_sample, latitude, longitude, LATAM_radio_10_CON_TIPO), 
+             aes(x=longitude, y=latitude, colour  = LATAM_radio_10_CON_TIPO) ) +
+  scale_colour_viridis_c(
+    name = "Tree cover (%)",
+    option = "viridis",
+    na.value = "transparent",
+   # limits = c(0, 100),
+    guide = guide_colorbar(title.position = "top")) 
+
+
+ggplot() +
+  geom_point(data = df_final_latam |> select(id_sample, latitude, longitude, LATAM_radio_50_CON_TIPO), 
+             aes(x=longitude, y=latitude, colour  = LATAM_radio_50_CON_TIPO) ) +
+  scale_colour_viridis_c(
+    name = "Tree cover (%)",
+    option = "viridis",
+    na.value = "transparent",
+   # limits = c(0, 100),
+    guide = guide_colorbar(title.position = "top")) 
+
+
+
+ggplot() +
+  geom_point(data = df_final_latam |> select(id_sample, latitude, longitude, LATAM_radio_50_SIN_TIPO), 
+             aes(x=longitude, y=latitude, colour  = LATAM_radio_50_SIN_TIPO) ) +
+  scale_colour_viridis_c(
+    name = "Tree cover (%)",
+    option = "viridis",
+    na.value = "transparent",
+   # limits = c(0, 100),
+    guide = guide_colorbar(title.position = "top")) 
+
+
+```
+
+
+
+
+
+
+Para cambiar la resolución del raster promediado solo para plotting (sin modificar los datos originales), puedes usar la función aggregate() de terra para disminuir la resolución (hacer los píxeles más grandes) o disagg() para aumentarla (hacerlos más pequeños).
+
+```{r}
+library(terra)
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(tidyterra)
+```
+
+
+```{r}
+
+# ---- PREPARAR RASTERS PARA PLOTTING (ORDEN CORRECTO) ----
+
+
+# 1. Definir rutas
+dir_resultados <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed"
+
+# 2. Cargar los rasters promedio originales (Sinusoidal)
+raster_latam <- rast(file.path(dir_resultados, "raster_promedio_LATAM.tif"))
+raster_europa <- rast(file.path(dir_resultados, "raster_promedio_EUROPA.tif"))
+
+# 3. Cargar polígonos de tierra (Natural Earth) en WGS84
+land_polyg_latam <- st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
+) %>%
+  st_transform(crs = 4326) %>%
+  st_crop(xmin = -118, xmax = -33, ymin = -55, ymax = 32) %>%
+  st_union()
+
+land_polyg_eur <- st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
+) %>%
+  st_transform(crs = 4326) %>%
+  st_crop(xmin = -20, xmax = 62, ymin = 29, ymax = 75) %>%
+  st_union()
+
+# 4. Función para preparar raster (orden corregido)
+preparar_raster_plot <- function(raster, land_polygon, factor_agregacion = 4, 
+                                 proyeccion = "EPSG:4326", nombre_region = "") {
+  
+  cat("\n", paste(rep("=", 50), collapse = ""), "\n")
+  cat("📊 Preparando raster para", nombre_region, "\n")
+  cat(paste(rep("=", 50), collapse = ""), "\n")
+  
+  # 4.1 PROYECTAR PRIMERO a WGS84 (antes de agregar o enmascarar)
+  cat("  Proyectando a", proyeccion, "...\n")
+  raster_proj <- project(raster, proyeccion, method = "bilinear")
+  
+  # 4.2 REDUCIR RESOLUCIÓN (agregar celdas) en WGS84
+  cat("  Reduciendo resolución (factor =", factor_agregacion, ")...\n")
+  raster_agg <- aggregate(raster_proj, fact = factor_agregacion, fun = "mean", na.rm = TRUE)
+  
+  # 4.3 ENMASCARAR al final (en WGS84)
+  cat("  Aplicando máscara (eliminando océano)...\n")
+  
+  # Convertir polígono a SpatVector (en WGS84)
+  mask_vect <- vect(land_polygon)
+  
+  # Aplicar máscara (solo tierra)
+  raster_mask <- mask(raster_agg, mask_vect)
+  
+  # 4.4 Asignar nombre
+  names(raster_mask) <- "tree_cover"
+  
+  # 4.5 Convertir a SpatRaster (si es necesario)
+  raster_mask <- rast(raster_mask)
+  
+  cat("  ✅ Raster preparado\n")
+  cat("  Nueva resolución:", res(raster_mask), "\n")
+  cat("  Nuevo CRS:", crs(raster_mask), "\n")
+  
+  return(raster_mask)
+}
+
+# 5. Preparar rasters (orden corregido)
+raster_latam_plot <- preparar_raster_plot(
+  raster = raster_latam,
+  land_polygon = land_polyg_latam,
+  factor_agregacion = 6,
+  proyeccion = "EPSG:4326",
+  nombre_region = "LATAM"
+)
+
+raster_europa_plot <- preparar_raster_plot(
+  raster = raster_europa,
+  land_polygon = land_polyg_eur,
+  factor_agregacion = 6,
+  proyeccion = "EPSG:4326",
+  nombre_region = "EUROPA"
+)
+
+
+
+```
+
+
+
+
+```{r}
+# ---- 2. GUARDAR RASTERS PLOT ----
+writeRaster(raster_latam_plot, 
+            file.path(dir_resultados, "raster_promedio_LATAM_plot.tif"), 
+            overwrite = TRUE)
+
+writeRaster(raster_europa_plot, 
+            file.path(dir_resultados, "raster_promedio_EUROPA_plot.tif"), 
+            overwrite = TRUE)
+
+cat("\n✅ Rasters guardados:\n")
+cat("  -", file.path(dir_resultados, "raster_promedio_LATAM_plot.tif"), "\n")
+cat("  -", file.path(dir_resultados, "raster_promedio_EUROPA_plot.tif"), "\n")
+
+# ---- 3. CARGAR RASTERS PLOT (DESDE ARCHIVO) ----
+raster_latam_plot <- rast(file.path(dir_resultados, "raster_promedio_LATAM_plot.tif"))
+raster_europa_plot <- rast(file.path(dir_resultados, "raster_promedio_EUROPA_plot.tif"))
+
+# ---- 4. PLOTTING ----
+library(ggplot2)
+library(tidyterra)
+
+# LATAM
+p_latam <- ggplot() +
+  geom_spatraster(data = raster_latam_plot) +
+  scale_fill_viridis_c(
+    name = "Tree cover (%)",
+    option = "viridis",
+    na.value = "transparent",
+    limits = c(0, 100)
+  ) +
+  labs(
+    title = "Tree cover promedio - LATAM (2000-2021)",
+    x = "Longitud",
+    y = "Latitud"
+  ) +
+  theme_minimal() +
+  coord_sf()
+
+print(p_latam)
+
+# EUROPA
+p_europa <- ggplot() +
+  geom_spatraster(data = raster_europa_plot) +
+  scale_fill_viridis_c(
+    name = "Tree cover (%)",
+    option = "viridis",
+    na.value = "transparent",
+    limits = c(0, 100)
+  ) +
+  labs(
+    title = "Tree cover promedio - EUROPA (2000-2021)",
+    x = "Longitud",
+    y = "Latitud"
+  ) +
+  theme_minimal() +
+  coord_sf()
+
+print(p_europa)
+
+# ---- 5. GUARDAR GRÁFICOS ----
+ggsave(file.path(dir_resultados, "plot_LATAM_treecover.png"), 
+       plot = p_latam, width = 10, height = 8, dpi = 300)
+
+ggsave(file.path(dir_resultados, "plot_EUROPA_treecover.png"), 
+       plot = p_europa, width = 10, height = 8, dpi = 300)
+
+cat("\n✅ Gráficos guardados:\n")
+cat("  -", file.path(dir_resultados, "plot_LATAM_treecover.png"), "\n")
+cat("  -", file.path(dir_resultados, "plot_EUROPA_treecover.png"), "\n")
+```
+
+
+
+
