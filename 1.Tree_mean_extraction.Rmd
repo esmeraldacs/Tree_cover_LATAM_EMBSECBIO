@@ -325,9 +325,6 @@ pts_europa <- modern_pollen_europe |> select(id_sample, latitude, longitude)
 
 nrow(pts_latam)
 nrow(pts_europa)
-
-n_distinct(pts_latam$id_sample)
-n_distinct(pts_europa$id_sample)
 ```
 
 2. Trabajar en un CRS métrico
@@ -426,6 +423,13 @@ saveRDS(extract50_europa, "Data/Processed/treecover_extract_EUROPA_50km_EPSG6933
 ```
 
 
+```{r}
+extract50_latam <- readRDS("Data/Processed/treecover_extract_LATAM_50km_EPSG6933_250m.rds")
+
+extract50_europa <- readRDS("Data/Processed/treecover_extract_EUROPA_50km_EPSG6933_250m.rds")
+```
+
+
 Ahora viene la parte de calcular los seis escenarios gaussianos. Como extract50_* son enormes, yo lo haría por región y por radio, evitando crear tres columnas permanentes de pesos.
 Empezaría con LATAM y, cuando comprobemos que funciona, hacemos exactamente lo mismo para Europa.
 Primero define los sigmas:
@@ -496,48 +500,174 @@ This criterion prevents tree-cover estimates from being calculated for sampling 
 ```{r}
 results50_latam <- extract50_latam |>
   group_by(ID) |>
-  summarise(n_total = n(), n_na = sum(is.na(tree_cover)),
+  summarise(
+
+    # ========================================================================
     # SCENARIO 1
-    Tree_Gaussian_50_sigma100 = if_else(n_na > n_total / 2, # If more than half of the pixels in the 50-km buffer are NA,
-      # do not calculate an estimate. 
-                                        NA_real_, 
-           # Otherwise calculate the Gaussian-weighted mean.
-      # NUMERATOR:
-      # For every pixel:
-      # tree_cover * Gaussian weight
-      # where the Gaussian weight is: exp(-d² / (2*sigma²))
-      # na.rm = TRUE ensures that pixels with missing tree_cover values do not contribute to the numerator.
-                                        sum(
-                                          tree_cover * 
-                                            exp(
-                                              -(distance_m^2) / 
-                                                (2 * sigma50_100^2)
-                                              ), 
-                                          na.rm = TRUE) /
-         # DENOMINATOR:
-        # Sum the Gaussian weights ONLY for pixels that have a valid tree_cover value.
-        # This is important because including the weights of NA pixels
-        # would artificially reduce the weighted tree-cover estimate.
-                                          sum(
-                                            exp(
-                                              -(distance_m[!is.na(tree_cover)]^2) / 
-                                                (2 * sigma50_100^2)
-                                              ) 
-                                            ) 
-      ),
+    # Radius = 50 km
+    # sigma = 50 km / 100 = 500 m
+    #
+    # Missing-data rule:
+    # Evaluate data availability ONLY within one sigma (500 m).
+    # If more than 50% of the pixels located within 500 m are NA,
+    # the final estimate is assigned NA.
+    #
+    # IMPORTANT:
+    # The NA criterion is evaluated within sigma, but the Gaussian weighted
+    # mean itself still uses all available pixels within the complete
+    # 50-km extraction radius.
+    # ========================================================================
+
+    n_sigma100 = sum(distance_m <= sigma50_100),
+
+    n_na_sigma100 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_100
+    ),
+
+    Tree_Gaussian_50_sigma100 = if_else(
+
+      n_na_sigma100 > n_sigma100 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma50_100^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_100^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
     # SCENARIO 2
-    Tree_Gaussian_50_sigma10 = if_else(n_na > n_total / 2, NA_real_,
-      sum(tree_cover * exp(-(distance_m^2) / (2 * sigma50_10^2)), na.rm = TRUE) /
-        sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_10^2)) ) ),
+    # Radius = 50 km
+    # sigma = 50 km / 10 = 5,000 m
+    #
+    # The NA criterion is evaluated using only pixels within 5 km.
+    # ========================================================================
+
+    n_sigma10 = sum(distance_m <= sigma50_10),
+
+    n_na_sigma10 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_10
+    ),
+
+    Tree_Gaussian_50_sigma10 = if_else(
+
+      n_na_sigma10 > n_sigma10 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma50_10^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_10^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
     # SCENARIO 3
-    Tree_Gaussian_50_sigma3 = if_else( n_na > n_total / 2, NA_real_,
-      sum(tree_cover * exp(-(distance_m^2) / (2 * sigma50_3^2)), na.rm = TRUE) /
-        sum(exp(-(distance_m[!is.na(tree_cover)]^2) /  (2 * sigma50_3^2)) ) ),
+    # Radius = 50 km
+    # sigma = 50 km / 3 = 16,666.67 m
+    #
+    # The NA criterion is evaluated using only pixels within 16.67 km.
+    # ========================================================================
+
+    n_sigma3 = sum(distance_m <= sigma50_3),
+
+    n_na_sigma3 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_3
+    ),
+
+    Tree_Gaussian_50_sigma3 = if_else(
+
+      n_na_sigma3 > n_sigma3 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma50_3^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_3^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
     # SCENARIO 4
-    Tree_Gaussian_50_sigma2 = if_else( n_na > n_total / 2, NA_real_,
-      sum(tree_cover * exp(-(distance_m^2) / (2 * sigma50_2^2)), na.rm = TRUE) /
-        sum(exp(-(distance_m[!is.na(tree_cover)]^2) /  (2 * sigma50_2^2)) ) ),
-    .groups = "drop" )
+    # Radius = 50 km
+    # sigma = 50 km / 2 = 25,000 m
+    #
+    # The NA criterion is evaluated using only pixels within 25 km.
+    # ========================================================================
+
+    n_sigma2 = sum(distance_m <= sigma50_2),
+
+    n_na_sigma2 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_2
+    ),
+
+    Tree_Gaussian_50_sigma2 = if_else(
+
+      n_na_sigma2 > n_sigma2 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma50_2^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_2^2)
+          )
+        )
+    ),
+
+    .groups = "drop"
+  )
+
 ```
 
 Una interpretación útil para documentar tus escenarios es recordar qué ocurre a una distancia igual a σ. En una gaussiana:
@@ -556,20 +686,17 @@ Esto deja muy clara la diferencia conceptual: aunque los tres escenarios usan un
 
 Verificacion antes de continuar
 ```{r}
-head(results50_latam)
-
-summary(results50_latam$Tree_Gaussian_50_sigma100)
-summary(results50_latam$Tree_Gaussian_50_sigma10)
-summary(results50_latam$Tree_Gaussian_50_sigma3)
-summary(results50_latam$Tree_Gaussian_50_sigma2)
-
-
-#Cuantos puntos quedaron como NA
-results50_latam |> summarise(n_samples = n(),
-                             NA_sigma100 = sum(is.na(Tree_Gaussian_50_sigma100)),
-                             NA_sigma10  = sum(is.na(Tree_Gaussian_50_sigma10)),
-                             NA_sigma3   = sum(is.na(Tree_Gaussian_50_sigma3)),
-                             NA_sigma2   = sum(is.na(Tree_Gaussian_50_sigma2)))
+results50_latam |>
+  select(
+    ID,
+    n_sigma100,
+    n_na_sigma100,
+    Tree_Gaussian_50_sigma100
+  ) |>
+  mutate(
+    prop_na_sigma100 = n_na_sigma100 / n_sigma100
+  ) |>
+  arrange(desc(prop_na_sigma100))
 ```
 
 #Ahora seguimos con los escenarios  de 25 km
@@ -592,32 +719,162 @@ extract25_latam <- extract50_latam |> filter(distance_m <= 25000)
 #extract25_latam |> count(ID) |> summary()
 ```
 
+
+
 ```{r}
 results25_latam <- extract25_latam |>
   group_by(ID) |>
   summarise(
-    n_total = n(),
-    n_na = sum(is.na(tree_cover)),
-    # SCENARIO 1: sigma = 25 km / 100 = 250 m
-    Tree_Gaussian_25_sigma100 = if_else(n_na > n_total / 2, NA_real_,
-      sum(tree_cover * exp(-(distance_m^2) / (2 * sigma25_100^2)), na.rm = TRUE) /
-        sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_100^2)))),
 
-    # SCENARIO 2: sigma = 25 km / 10 = 2,500 m
-    Tree_Gaussian_25_sigma10 = if_else(n_na > n_total / 2, NA_real_,
-      sum(tree_cover * exp(-(distance_m^2) / (2 * sigma25_10^2)), na.rm = TRUE) /
-        sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_10^2)))),
+    # ========================================================================
+    # SCENARIO 1
+    # Radius = 25 km
+    # sigma = 25 km / 100 = 250 m
+    # ========================================================================
 
-    # SCENARIO 3: sigma = 25 km / 3 = 8,333.33 m
-    Tree_Gaussian_25_sigma3 = if_else(n_na > n_total / 2, NA_real_,
-      sum(tree_cover * exp(-(distance_m^2) / (2 * sigma25_3^2)), na.rm = TRUE) /
-        sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_3^2)))),
+    n_sigma100 = sum(distance_m <= sigma25_100),
 
-    # SCENARIO 4: sigma = 25 km / 2 = 12,500 m
-    Tree_Gaussian_25_sigma2 = if_else(n_na > n_total / 2, NA_real_,
-      sum(tree_cover * exp(-(distance_m^2) / (2 * sigma25_2^2)), na.rm = TRUE) /
-        sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_2^2)))),
-    .groups = "drop")
+    n_na_sigma100 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_100
+    ),
+
+    Tree_Gaussian_25_sigma100 = if_else(
+
+      n_na_sigma100 > n_sigma100 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_100^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_100^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
+    # SCENARIO 2
+    # Radius = 25 km
+    # sigma = 25 km / 10 = 2,500 m
+    # ========================================================================
+
+    n_sigma10 = sum(distance_m <= sigma25_10),
+
+    n_na_sigma10 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_10
+    ),
+
+    Tree_Gaussian_25_sigma10 = if_else(
+
+      n_na_sigma10 > n_sigma10 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_10^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_10^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
+    # SCENARIO 3
+    # Radius = 25 km
+    # sigma = 25 km / 3 = 8,333.33 m
+    # ========================================================================
+
+    n_sigma3 = sum(distance_m <= sigma25_3),
+
+    n_na_sigma3 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_3
+    ),
+
+    Tree_Gaussian_25_sigma3 = if_else(
+
+      n_na_sigma3 > n_sigma3 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_3^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_3^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
+    # SCENARIO 4
+    # Radius = 25 km
+    # sigma = 25 km / 2 = 12,500 m
+    # ========================================================================
+
+    n_sigma2 = sum(distance_m <= sigma25_2),
+
+    n_na_sigma2 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_2
+    ),
+
+    Tree_Gaussian_25_sigma2 = if_else(
+
+      n_na_sigma2 > n_sigma2 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_2^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_2^2)
+          )
+        )
+    ),
+
+    .groups = "drop"
+  )
 ```
 
 
@@ -642,7 +899,7 @@ results25_latam |>
 tree_gaussian_latam <- results50_latam |>
   select(
     ID,
-    Tree_Gaussian_5_sigma100,
+    Tree_Gaussian_50_sigma100,
     Tree_Gaussian_50_sigma10,
     Tree_Gaussian_50_sigma3,
     Tree_Gaussian_50_sigma2
@@ -662,531 +919,520 @@ tree_gaussian_latam <- results50_latam |>
 
 
 ```{r}
-saveRDS(
-  tree_gaussian_latam,
-  "Data/Processed/tree_gaussian_LATAM_25_50km.rds"
-)
-```
-
-
-
-############################
-#############################
-##################################
-
-
-
-
-
-
-```{r}
-# ---- RECREAR ESCENARIOS ----
-# Definir factores (si no existen)
-factores_categoria <- tribble(
-  ~sample_category, ~factor,
-  "LAKE", 1.0,
-  "TERR_MEDIUM", 0.6,
-  "TERR_SMALL", 0.3,
-  "NOT_KNOWN", 1.0
-)
-
-# Definir radios y enfoques
-radios_base <- c(10, 12, 18, 20, 24, 30, 36, 42, 48, 50, 54, 60)
-enfoques <- c("SIN_TIPO", "CON_TIPO")
-
-# Crear tabla de escenarios
-escenarios <- expand_grid(
-  region = c("LATAM", "EUROPA"),
-  radio_km = radios_base,
-  enfoque = enfoques
-) %>%
-  mutate(nombre = paste(region, "radio", radio_km, enfoque, sep = "_"))
-
-# Verificar que se creó
-cat("✅ Escenarios creados:", nrow(escenarios), "\n")
-print(head(escenarios, 5))
-```
-
-
-  
-```{r}
-# ---- BLOQUE 2: FUNCIÓN PARA EXTRAER UN PUNTO ----
-extraer_un_punto <- function(raster, lon, lat, radio_km, factor) {
-  
-  sigma <- (radio_km * 1000 * factor) / 3
-  
-  punto_vect <- vect(cbind(lon, lat), crs = "EPSG:4326")
-  punto_proj <- project(punto_vect, crs(raster))
-  coord_centro <- crds(punto_proj)
-  x_centro <- coord_centro[1, "x"]
-  y_centro <- coord_centro[1, "y"]
-  
-  radio_max <- radio_km * 1000
-  buffer <- buffer(punto_proj, width = radio_max)
-  raster_buffer <- crop(raster, buffer)
-  
-  if (ncell(raster_buffer) == 0) return(NA_real_)
-  
-  coords_pixeles <- xyFromCell(raster_buffer, 1:ncell(raster_buffer))
-  valores_raw <- values(raster_buffer, mat = FALSE)
-  
-  if (is.vector(valores_raw)) {
-    valores_pixeles <- valores_raw
-  } else {
-    valores_pixeles <- valores_raw[, 1]
-  }
-  
-  distancias <- sqrt((coords_pixeles[, 1] - x_centro)^2 + 
-                     (coords_pixeles[, 2] - y_centro)^2)
-  pesos <- exp(-(distancias^2) / (2 * sigma^2))
-  
-  df_pixeles <- tibble(valor = valores_pixeles, peso = pesos) %>%
-    filter(!is.na(valor), peso > 0)
-  
-  if (nrow(df_pixeles) == 0) return(NA_real_)
-  
-  return(sum(df_pixeles$valor * df_pixeles$peso) / sum(df_pixeles$peso))
-}
-
-
-# ---- BLOQUE 3: FUNCIÓN PARA PROCESAR UN ESCENARIO ----
-procesar_escenario <- function(raster_promedio, df_puntos, radio_km, enfoque, 
-                               nombre_escenario) {
-  
-  cat("📊", nombre_escenario, "- Radio:", radio_km, "km |", enfoque, "\n")
-  
-  # Asignar factor según enfoque
-  if (enfoque == "SIN_TIPO") {
-    df_puntos <- df_puntos %>% mutate(factor_usado = 1.0)
-  } else {
-    df_puntos <- df_puntos %>%
-      mutate(
-        factor_usado = case_when(
-          sample_category == "LAKE" ~ 1.0,
-          sample_category == "TERR_MEDIUM" ~ 0.6,
-          sample_category == "TERR_SMALL" ~ 0.3,
-          sample_category == "NOT_KNOWN" ~ 1.0,
-          TRUE ~ 1.0
-        )
-      )
-  }
-  
-  # Extraer tree cover para cada punto (usando el raster promedio)
-  df_puntos <- df_puntos %>%
-    mutate(
-      tree_cover_promedio = map2_dbl(
-        .x = longitude,
-        .y = latitude,
-        .f = ~{
-          extraer_un_punto(
-            raster = raster_promedio,
-            lon = .x,
-            lat = .y,
-            radio_km = radio_km,
-            factor = factor_usado[which(longitude == .x & latitude == .y)[1]]
-          )
-        }
-      )
-    ) %>%
-    select(-factor_usado)
-  
-  cat("✅", nombre_escenario, "completado\n")
-  return(df_puntos)
-}
-
-
-# ---- BLOQUE 4: EJECUTAR TODOS LOS ESCENARIOS ----
-dir_resultados <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Extraction_TreeCover"
-if (!dir.exists(dir_resultados)) dir.create(dir_resultados, recursive = TRUE)
-
-setwd(dir_resultados)
-
-resultados_globales <- list()
-
-for (i in 1:nrow(escenarios)) {
-  
-  region <- escenarios$region[i]
-  radio_km <- escenarios$radio_km[i]
-  enfoque <- escenarios$enfoque[i]
-  nombre <- escenarios$nombre[i]
-  
-  cat("\n🚀", i, "/", nrow(escenarios), "-", nombre, "\n")
-  
-  # Seleccionar raster promedio y puntos según región
-  if (region == "LATAM") {
-    raster <- raster_promedio_latam
-    df_puntos <- modern_pollen_latam_class
-  } else {
-    raster <- raster_promedio_europa
-    df_puntos <- modern_pollen_europe_class
-  }
-  
-  # Procesar escenario
-  df_resultado <- procesar_escenario(
-    raster_promedio = raster,
-    df_puntos = df_puntos,
-    radio_km = radio_km,
-    enfoque = enfoque,
-    nombre_escenario = nombre
+id_lookup_latam <- pts_latam |>
+  mutate(ID = row_number()) |>
+  select(
+    ID,
+    id_sample,
+    latitude,
+    longitude
   )
-  
-  # Guardar resultado
-  archivo_resultado <- file.path(dir_resultados, paste0("resultados_", nombre, ".rds"))
-  saveRDS(df_resultado, archivo_resultado)
-  
-  resultados_globales[[nombre]] <- df_resultado
-}
 
-cat("\n🎉 PROCESAMIENTO COMPLETADO\n")
+tree_gaussian_latam <- tree_gaussian_latam |>
+  left_join(
+    id_lookup_latam,
+    by = "ID"
+  ) |>
+  relocate(
+    id_sample,
+    latitude,
+    longitude,
+    .after = ID
+  )
 ```
 
 
 ```{r}
+ggplot(data = tree_gaussian_latam) +
+  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma100)) +
+  scale_color_viridis_c(option = "plasma")
 
-# ---- SCRIPT OPTIMIZADO: ARCHIVOS SEPARADOS Y JOIN MÚLTIPLE (CORREGIDO) ----
-dir_resultados <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Extraction_TreeCover"
+ggplot(data = tree_gaussian_latam) +
+  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma2)) +
+  scale_color_viridis_c(option = "plasma")
+```
 
-# 1. Cargar metadatos completos
-modern_pollen_latam_class <- readRDS("C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Input/modern_pollen_latam_class.rds")
-modern_pollen_europe_class <- readRDS("C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Input/modern_pollen_europe_class.rds")
 
-# 2. Función para consolidar una región
-consolidar_region <- function(region, df_metadatos, dir_resultados) {
-  
-  cat("\n", paste(rep("=", 60), collapse = ""), "\n")
-  cat("📊 Consolidando", region, "\n")
-  cat(paste(rep("=", 60), collapse = ""), "\n")
-  
-  # 2.1 Listar archivos de la región
-  patron <- paste0("resultados_", region, "_.*\\.rds$")
-  archivos <- list.files(dir_resultados, pattern = patron, full.names = TRUE)
-  
-  cat("  Archivos encontrados:", length(archivos), "\n")
-  
-  # 2.2 Cargar solo las columnas necesarias
-  resultados_limpios <- list()
-  
-  for (archivo in archivos) {
-    # Extraer nombre del escenario (CORREGIDO)
-    nombre <- basename(archivo) %>%
-      str_remove("^resultados_") %>%
-      str_remove("\\.rds$")
-    
-    # Cargar solo columnas necesarias
-    df <- readRDS(archivo) %>%
-      select(id_sample, latitude, longitude, elevation, sample_category,
-             tree_cover_promedio) %>%
-      distinct(id_sample, latitude, longitude, elevation, .keep_all = TRUE)
-    
-    resultados_limpios[[nombre]] <- df
-    cat("  ✅", nombre, "-", nrow(df), "filas únicas\n")
-  }
-  
-  # 2.3 Consolidar usando join múltiple
-  nombres <- names(resultados_limpios)
-  primer_escenario <- nombres[1]
-  
-  df_final <- resultados_limpios[[primer_escenario]] %>%
-    rename(!!primer_escenario := tree_cover_promedio)
-  
-  for (nombre in nombres[-1]) {
-    cat("  Añadiendo:", nombre, "\n")
-    
-    df_temp <- resultados_limpios[[nombre]] %>%
-      select(id_sample, latitude, longitude, elevation, tree_cover_promedio) %>%
-      rename(!!nombre := tree_cover_promedio)
-    
-    df_final <- df_final %>%
-      left_join(df_temp, 
-                by = c("id_sample", "latitude", "longitude", "elevation"),
-                relationship = "one-to-one")
-  }
-  
-  # 2.4 Añadir todas las columnas de especies
-  cat("  Añadiendo columnas de especies...\n")
-  
-  df_final <- df_metadatos %>%
-    select(-latitude, -longitude, -elevation, -sample_category) %>%
-    left_join(df_final, by = "id_sample")
-  
-  # 2.5 Reordenar
-  df_final <- df_final %>%
-    select(id_sample, entity_name, latitude, longitude, elevation, 
-           sample_category,
-           starts_with(region),
-           everything())
-  
-  cat("  ✅ Consolidación completada\n")
-  cat("  Filas:", nrow(df_final), "\n")
-  cat("  Columnas:", ncol(df_final), "\n")
-  
-  return(df_final)
-}
+```{r}
+saveRDS(tree_gaussian_latam, "Data/Processed/tree_gaussian_LATAM_25_50km.rds")
+```
 
-# 3. Consolidar LATAM
-df_final_latam <- consolidar_region(
-  region = "LATAM",
-  df_metadatos = modern_pollen_latam_class,
-  dir_resultados = dir_resultados
+
+```{r}
+modern_pollen_latam_gaussian <- modern_pollen_latam |>
+  left_join(
+    tree_gaussian_latam |>
+      select(
+        -ID,
+        -latitude,
+        -longitude
+      ),
+    by = "id_sample"
+  )
+```
+
+
+```{r}
+saveRDS(modern_pollen_latam_gaussian, "Data/Processed/tree_gaussian_LATAM_25_50km_modern_pollen.rds")
+```
+
+
+Ahora empezamos con EUROPA
+```{r}
+# ============================================================
+# EUROPA — DEFINIR SIGMAS
+# ============================================================
+
+# Sigma para radio de 50 km
+sigma50_100 <- 50000 / 100   # 500 m
+sigma50_10  <- 50000 / 10    # 5,000 m
+sigma50_3   <- 50000 / 3     # 16,666.67 m
+sigma50_2   <- 50000 / 2     # 25,000 m
+
+# Sigma para radio de 25 km
+sigma25_100 <- 25000 / 100   # 250 m
+sigma25_10  <- 25000 / 10    # 2,500 m
+sigma25_3   <- 25000 / 3     # 8,333.33 m
+sigma25_2   <- 25000 / 2     # 12,500 m
+```
+
+
+```{r}
+# ============================================================
+# EUROPA — GAUSSIAN TREE COVER, RADIO DE 50 KM
+# ============================================================
+
+results50_europa <- extract50_europa |>
+  group_by(ID) |>
+  summarise(
+
+    # --------------------------------------------------------
+    # SCENARIO 1
+    # Radius = 50 km
+    # sigma = 500 m
+    #
+    # La cobertura NA se evalúa únicamente dentro de 1 sigma.
+    # Si más del 50% de los píxeles dentro de sigma son NA,
+    # el resultado final se asigna como NA.
+    #
+    # El promedio gaussiano, sin embargo, sigue utilizando
+    # todos los píxeles válidos dentro del radio completo
+    # de 50 km.
+    # --------------------------------------------------------
+
+    n_sigma100 = sum(distance_m <= sigma50_100),
+
+    n_na_sigma100 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_100
+    ),
+
+    Tree_Gaussian_50_sigma100 = if_else(
+      n_na_sigma100 > n_sigma100 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(-(distance_m^2) / (2 * sigma50_100^2)),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_100^2)
+          )
+        )
+    ),
+
+
+    # --------------------------------------------------------
+    # SCENARIO 2
+    # Radius = 50 km
+    # sigma = 5 km
+    # --------------------------------------------------------
+
+    n_sigma10 = sum(distance_m <= sigma50_10),
+
+    n_na_sigma10 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_10
+    ),
+
+    Tree_Gaussian_50_sigma10 = if_else(
+      n_na_sigma10 > n_sigma10 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(-(distance_m^2) / (2 * sigma50_10^2)),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_10^2)
+          )
+        )
+    ),
+
+
+    # --------------------------------------------------------
+    # SCENARIO 3
+    # Radius = 50 km
+    # sigma = 16.67 km
+    # --------------------------------------------------------
+
+    n_sigma3 = sum(distance_m <= sigma50_3),
+
+    n_na_sigma3 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_3
+    ),
+
+    Tree_Gaussian_50_sigma3 = if_else(
+      n_na_sigma3 > n_sigma3 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(-(distance_m^2) / (2 * sigma50_3^2)),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_3^2)
+          )
+        )
+    ),
+
+
+    # --------------------------------------------------------
+    # SCENARIO 4
+    # Radius = 50 km
+    # sigma = 25 km
+    # --------------------------------------------------------
+
+    n_sigma2 = sum(distance_m <= sigma50_2),
+
+    n_na_sigma2 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_2
+    ),
+
+    Tree_Gaussian_50_sigma2 = if_else(
+      n_na_sigma2 > n_sigma2 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(-(distance_m^2) / (2 * sigma50_2^2)),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_2^2)
+          )
+        )
+    ),
+
+    .groups = "drop"
+  )
+```
+
+
+Revisamos
+```{r}
+summary(results50_europa$Tree_Gaussian_50_sigma100)
+summary(results50_europa$Tree_Gaussian_50_sigma10)
+summary(results50_europa$Tree_Gaussian_50_sigma3)
+summary(results50_europa$Tree_Gaussian_50_sigma2)
+```
+
+```{r}
+# ============================================================
+# EUROPE — SELECT PIXELS WITHIN 25 KM
+# ============================================================
+
+extract25_europa <- extract50_europa |>
+  filter(distance_m <= 25000)
+```
+
+
+
+```{r}
+# ============================================================
+# EUROPE — GAUSSIAN-WEIGHTED TREE COVER WITHIN 25 KM
+# ============================================================
+#
+# Missing-data rule:
+#
+# For each Gaussian scenario, raster coverage is evaluated within
+# a distance equivalent to one sigma (σ).
+#
+# If MORE THAN 50% of the pixels located within 1σ are NA,
+# the tree-cover estimate is assigned NA.
+#
+# Otherwise, the Gaussian-weighted mean is calculated using all
+# valid tree-cover pixels within the complete 25-km radius.
+#
+# Therefore:
+#
+# sigma/100 -> coverage evaluated within    250 m
+# sigma/10  -> coverage evaluated within  2,500 m
+# sigma/3   -> coverage evaluated within  8,333 m
+# sigma/2   -> coverage evaluated within 12,500 m
+#
+# ============================================================
+
+
+results25_europa <- extract25_europa |>
+  group_by(ID) |>
+  summarise(
+
+    # ========================================================
+    # SCENARIO 1
+    # Radius = 25 km
+    # sigma = 25 km / 100 = 250 m
+    # ========================================================
+
+    n_sigma100 = sum(
+      distance_m <= sigma25_100
+    ),
+
+    n_na_sigma100 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_100
+    ),
+
+    Tree_Gaussian_25_sigma100 = if_else(
+
+      n_na_sigma100 > n_sigma100 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_100^2)
+          ),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_100^2)
+          )
+        )
+    ),
+
+
+    # ========================================================
+    # SCENARIO 2
+    # Radius = 25 km
+    # sigma = 25 km / 10 = 2,500 m
+    # ========================================================
+
+    n_sigma10 = sum(
+      distance_m <= sigma25_10
+    ),
+
+    n_na_sigma10 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_10
+    ),
+
+    Tree_Gaussian_25_sigma10 = if_else(
+
+      n_na_sigma10 > n_sigma10 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_10^2)
+          ),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_10^2)
+          )
+        )
+    ),
+
+
+    # ========================================================
+    # SCENARIO 3
+    # Radius = 25 km
+    # sigma = 25 km / 3 = 8,333.33 m
+    # ========================================================
+
+    n_sigma3 = sum(
+      distance_m <= sigma25_3
+    ),
+
+    n_na_sigma3 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_3
+    ),
+
+    Tree_Gaussian_25_sigma3 = if_else(
+
+      n_na_sigma3 > n_sigma3 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_3^2)
+          ),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_3^2)
+          )
+        )
+    ),
+
+
+    # ========================================================
+    # SCENARIO 4
+    # Radius = 25 km
+    # sigma = 25 km / 2 = 12,500 m
+    # ========================================================
+
+    n_sigma2 = sum(
+      distance_m <= sigma25_2
+    ),
+
+    n_na_sigma2 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_2
+    ),
+
+    Tree_Gaussian_25_sigma2 = if_else(
+
+      n_na_sigma2 > n_sigma2 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_2^2)
+          ),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_2^2)
+          )
+        )
+    ),
+
+    .groups = "drop"
+  )
+```
+
+
+
+```{r}
+# ============================================================
+# UNIR RESULTADOS DE 50 KM Y 25 KM — EUROPA
+# ============================================================
+
+tree_gaussian_europa <- results50_europa |>
+  select(
+    ID,
+    Tree_Gaussian_50_sigma100,
+    Tree_Gaussian_50_sigma10,
+    Tree_Gaussian_50_sigma3,
+    Tree_Gaussian_50_sigma2
+  ) |>
+  left_join(
+    results25_europa |>
+      select(
+        ID,
+        Tree_Gaussian_25_sigma100,
+        Tree_Gaussian_25_sigma10,
+        Tree_Gaussian_25_sigma3,
+        Tree_Gaussian_25_sigma2
+      ),
+    by = "ID"
+  )
+```
+
+
+```{r}
+nrow(tree_gaussian_europa)
+```
+
+
+```{r}
+id_lookup_europa <- pts_europa |>
+  mutate(ID = row_number()) |>
+  select(
+    ID,
+    id_sample,
+    latitude,
+    longitude
+  )
+
+tree_gaussian_europa <- tree_gaussian_europa |>
+  left_join(
+    id_lookup_europa,
+    by = "ID"
+  ) |>
+  relocate(
+    id_sample,
+    latitude,
+    longitude,
+    .after = ID
+  )
+```
+
+
+```{r}
+modern_pollen_europe_gaussian <- modern_pollen_europe |>
+  left_join(
+    tree_gaussian_europa |>
+      select(
+        -ID,
+        -latitude,
+        -longitude
+      ),
+    by = "id_sample"
+  )
+```
+
+
+
+```{r}
+saveRDS(
+  tree_gaussian_europa,
+  "Data/Processed/tree_gaussian_EUROPA_25_50km.rds"
 )
 
-# 4. Consolidar EUROPA
-df_final_europa <- consolidar_region(
-  region = "EUROPA",
-  df_metadatos = modern_pollen_europe_class,
-  dir_resultados = dir_resultados
+saveRDS(
+  modern_pollen_europe_gaussian,
+  "Data/Processed/tree_gaussian_EUROPA_25_50km_modern_pollen.rds"
 )
-
-# 5. Guardar archivos separados
-saveRDS(df_final_latam, file.path(dir_resultados, "df_final_LATAM_treecover.rds"))
-write_csv(df_final_latam, file.path(dir_resultados, "df_final_LATAM_treecover.csv"))
-
-saveRDS(df_final_europa, file.path(dir_resultados, "df_final_EUROPA_treecover.rds"))
-write_csv(df_final_europa, file.path(dir_resultados, "df_final_EUROPA_treecover.csv"))
-
-cat("\n", paste(rep("=", 60), collapse = ""), "\n")
-cat("🎉 PROCESAMIENTO COMPLETADO\n")
-cat(paste(rep("=", 60), collapse = ""), "\n")
-cat("✅ LATAM:", nrow(df_final_latam), "filas,", ncol(df_final_latam), "columnas\n")
-cat("   Guardado en:", file.path(dir_resultados, "df_final_LATAM_treecover.rds"), "\n")
-cat("✅ EUROPA:", nrow(df_final_europa), "filas,", ncol(df_final_europa), "columnas\n")
-cat("   Guardado en:", file.path(dir_resultados, "df_final_EUROPA_treecover.rds"), "\n")
-
-# Mostrar nombres de los primeros escenarios para verificar
-cat("\n📋 Nombres de escenarios (primeros 5):\n")
-print(head(names(df_final_latam)[grep("LATAM", names(df_final_latam))], 5))
-
-
 ```
-
-
-
-```{r}
-df_final_latam <- readRDS("Data/Processed/Extraction_TreeCover/df_final_LATAM_treecover.rds")
-
-df_final_europa <- readRDS("Data/Processed/Extraction_TreeCover/df_final_EUROPA_treecover.rds")
-
-```
-
-
-
-
-```{r}
-
-
-ggplot() +
-  geom_point(data = df_final_latam |> select(id_sample, latitude, longitude, LATAM_radio_10_CON_TIPO), 
-             aes(x=longitude, y=latitude, colour  = LATAM_radio_10_CON_TIPO) ) +
-  scale_colour_viridis_c(
-    name = "Tree cover (%)",
-    option = "viridis",
-    na.value = "transparent",
-   # limits = c(0, 100),
-    guide = guide_colorbar(title.position = "top")) 
-
-
-ggplot() +
-  geom_point(data = df_final_latam |> select(id_sample, latitude, longitude, LATAM_radio_50_CON_TIPO), 
-             aes(x=longitude, y=latitude, colour  = LATAM_radio_50_CON_TIPO) ) +
-  scale_colour_viridis_c(
-    name = "Tree cover (%)",
-    option = "viridis",
-    na.value = "transparent",
-   # limits = c(0, 100),
-    guide = guide_colorbar(title.position = "top")) 
-
-
-
-ggplot() +
-  geom_point(data = df_final_latam |> select(id_sample, latitude, longitude, LATAM_radio_50_SIN_TIPO), 
-             aes(x=longitude, y=latitude, colour  = LATAM_radio_50_SIN_TIPO) ) +
-  scale_colour_viridis_c(
-    name = "Tree cover (%)",
-    option = "viridis",
-    na.value = "transparent",
-   # limits = c(0, 100),
-    guide = guide_colorbar(title.position = "top")) 
-
-
-```
-
-
-
-
-
-
-Para cambiar la resolución del raster promediado solo para plotting (sin modificar los datos originales), puedes usar la función aggregate() de terra para disminuir la resolución (hacer los píxeles más grandes) o disagg() para aumentarla (hacerlos más pequeños).
-
-```{r}
-library(terra)
-library(tidyverse)
-library(sf)
-library(ggplot2)
-library(tidyterra)
-```
-
-
-```{r}
-
-# ---- PREPARAR RASTERS PARA PLOTTING (ORDEN CORRECTO) ----
-
-
-# 1. Definir rutas
-dir_resultados <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed"
-
-# 2. Cargar los rasters promedio originales (Sinusoidal)
-raster_latam <- rast(file.path(dir_resultados, "raster_promedio_LATAM.tif"))
-raster_europa <- rast(file.path(dir_resultados, "raster_promedio_EUROPA.tif"))
-
-# 3. Cargar polígonos de tierra (Natural Earth) en WGS84
-land_polyg_latam <- st_read(
-  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
-) %>%
-  st_transform(crs = 4326) %>%
-  st_crop(xmin = -118, xmax = -33, ymin = -55, ymax = 32) %>%
-  st_union()
-
-land_polyg_eur <- st_read(
-  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
-) %>%
-  st_transform(crs = 4326) %>%
-  st_crop(xmin = -20, xmax = 62, ymin = 29, ymax = 75) %>%
-  st_union()
-
-# 4. Función para preparar raster (orden corregido)
-preparar_raster_plot <- function(raster, land_polygon, factor_agregacion = 4, 
-                                 proyeccion = "EPSG:4326", nombre_region = "") {
-  
-  cat("\n", paste(rep("=", 50), collapse = ""), "\n")
-  cat("📊 Preparando raster para", nombre_region, "\n")
-  cat(paste(rep("=", 50), collapse = ""), "\n")
-  
-  # 4.1 PROYECTAR PRIMERO a WGS84 (antes de agregar o enmascarar)
-  cat("  Proyectando a", proyeccion, "...\n")
-  raster_proj <- project(raster, proyeccion, method = "bilinear")
-  
-  # 4.2 REDUCIR RESOLUCIÓN (agregar celdas) en WGS84
-  cat("  Reduciendo resolución (factor =", factor_agregacion, ")...\n")
-  raster_agg <- aggregate(raster_proj, fact = factor_agregacion, fun = "mean", na.rm = TRUE)
-  
-  # 4.3 ENMASCARAR al final (en WGS84)
-  cat("  Aplicando máscara (eliminando océano)...\n")
-  
-  # Convertir polígono a SpatVector (en WGS84)
-  mask_vect <- vect(land_polygon)
-  
-  # Aplicar máscara (solo tierra)
-  raster_mask <- mask(raster_agg, mask_vect)
-  
-  # 4.4 Asignar nombre
-  names(raster_mask) <- "tree_cover"
-  
-  # 4.5 Convertir a SpatRaster (si es necesario)
-  raster_mask <- rast(raster_mask)
-  
-  cat("  ✅ Raster preparado\n")
-  cat("  Nueva resolución:", res(raster_mask), "\n")
-  cat("  Nuevo CRS:", crs(raster_mask), "\n")
-  
-  return(raster_mask)
-}
-
-# 5. Preparar rasters (orden corregido)
-raster_latam_plot <- preparar_raster_plot(
-  raster = raster_latam,
-  land_polygon = land_polyg_latam,
-  factor_agregacion = 6,
-  proyeccion = "EPSG:4326",
-  nombre_region = "LATAM"
-)
-
-raster_europa_plot <- preparar_raster_plot(
-  raster = raster_europa,
-  land_polygon = land_polyg_eur,
-  factor_agregacion = 6,
-  proyeccion = "EPSG:4326",
-  nombre_region = "EUROPA"
-)
-
-
-
-```
-
-
-
-
-```{r}
-# ---- 2. GUARDAR RASTERS PLOT ----
-writeRaster(raster_latam_plot, 
-            file.path(dir_resultados, "raster_promedio_LATAM_plot.tif"), 
-            overwrite = TRUE)
-
-writeRaster(raster_europa_plot, 
-            file.path(dir_resultados, "raster_promedio_EUROPA_plot.tif"), 
-            overwrite = TRUE)
-
-cat("\n✅ Rasters guardados:\n")
-cat("  -", file.path(dir_resultados, "raster_promedio_LATAM_plot.tif"), "\n")
-cat("  -", file.path(dir_resultados, "raster_promedio_EUROPA_plot.tif"), "\n")
-
-# ---- 3. CARGAR RASTERS PLOT (DESDE ARCHIVO) ----
-raster_latam_plot <- rast(file.path(dir_resultados, "raster_promedio_LATAM_plot.tif"))
-raster_europa_plot <- rast(file.path(dir_resultados, "raster_promedio_EUROPA_plot.tif"))
-
-# ---- 4. PLOTTING ----
-library(ggplot2)
-library(tidyterra)
-
-# LATAM
-p_latam <- ggplot() +
-  geom_spatraster(data = raster_latam_plot) +
-  scale_fill_viridis_c(
-    name = "Tree cover (%)",
-    option = "viridis",
-    na.value = "transparent",
-    limits = c(0, 100)
-  ) +
-  labs(
-    title = "Tree cover promedio - LATAM (2000-2021)",
-    x = "Longitud",
-    y = "Latitud"
-  ) +
-  theme_minimal() +
-  coord_sf()
-
-print(p_latam)
-
-# EUROPA
-p_europa <- ggplot() +
-  geom_spatraster(data = raster_europa_plot) +
-  scale_fill_viridis_c(
-    name = "Tree cover (%)",
-    option = "viridis",
-    na.value = "transparent",
-    limits = c(0, 100)
-  ) +
-  labs(
-    title = "Tree cover promedio - EUROPA (2000-2021)",
-    x = "Longitud",
-    y = "Latitud"
-  ) +
-  theme_minimal() +
-  coord_sf()
-
-print(p_europa)
-
-# ---- 5. GUARDAR GRÁFICOS ----
-ggsave(file.path(dir_resultados, "plot_LATAM_treecover.png"), 
-       plot = p_latam, width = 10, height = 8, dpi = 300)
-
-ggsave(file.path(dir_resultados, "plot_EUROPA_treecover.png"), 
-       plot = p_europa, width = 10, height = 8, dpi = 300)
-
-cat("\n✅ Gráficos guardados:\n")
-cat("  -", file.path(dir_resultados, "plot_LATAM_treecover.png"), "\n")
-cat("  -", file.path(dir_resultados, "plot_EUROPA_treecover.png"), "\n")
-```
-
-
 
 
