@@ -47,40 +47,69 @@ my_path <-"Data/Processed/Output_calibration_and_reconstruction/"
 ```
 
 
+
 ```{r}
 # Load data (as before)
-europe_extraction <- readRDS("Data/Input/EUROP_tree_extraction_and_pollen_modern.rds")
-#set.seed(9751); europe_extraction <- sample_n(europe_extraction, size = 500)
+europe_extraction <- readRDS("Data/Processed/Extraction_TreeCover/df_final_EUROPA_treecover.rds") 
 
-latam_extraction <- readRDS("Data/Input/LATAM_tree_extraction_and_pollen_modern.rds")
-#set.seed(9751); latam_extraction <- sample_n(latam_extraction, size = 500)
+
+europe_extraction
+
+
+
+
+
+
+latam_extraction <- readRDS("Data/Processed/Extraction_TreeCover/df_final_LATAM_treecover.rds") 
+
+latam_extraction
 ```
+
+
+```{r}
+colnames(europe_extraction)
+```
+
 
 
 Chunk 1: Initial set up and load data
 ```{r}
 # Definir las columnas target (las de extracción de raster)
-target_cols <- c("Tree_Point", "Tree_Buffer_0.75km", "Tree_Buffer_1.5km",
-                 "Tree_Buffer_3km", "Tree_Buffer_6km", "Tree_Buffer_12km",
-                 "Tree_Buffer_24km", "Tree_Buffer_50km",
-                 "Gaussian_0.5km", "Gaussian_10km")
+target_cols_latam <- c( "LATAM_radio_10_CON_TIPO", "LATAM_radio_10_SIN_TIPO", "LATAM_radio_12_CON_TIPO",  "LATAM_radio_12_SIN_TIPO", "LATAM_radio_18_CON_TIPO", "LATAM_radio_18_SIN_TIPO", "LATAM_radio_20_CON_TIPO",   "LATAM_radio_20_SIN_TIPO",  "LATAM_radio_24_CON_TIPO",  "LATAM_radio_24_SIN_TIPO", "LATAM_radio_30_CON_TIPO" ,     "LATAM_radio_30_SIN_TIPO",   "LATAM_radio_36_CON_TIPO" , "LATAM_radio_36_SIN_TIPO" ,  "LATAM_radio_42_CON_TIPO",   
+  "LATAM_radio_42_SIN_TIPO",  "LATAM_radio_48_CON_TIPO"  ,   "LATAM_radio_48_SIN_TIPO" ,    
+  "LATAM_radio_50_CON_TIPO",   "LATAM_radio_50_SIN_TIPO"  ,   "LATAM_radio_54_CON_TIPO" ,    
+  "LATAM_radio_54_SIN_TIPO",  "LATAM_radio_60_CON_TIPO",     "LATAM_radio_60_SIN_TIPO")
+
+
+
+
+
+target_cols_europe <- c( "EUROPA_radio_48_SIN_TIPO")
+
+
+target_cols_europe <- c( "EUROPA_radio_10_CON_TIPO"  , "EUROPA_radio_10_SIN_TIPO" ,  "EUROPA_radio_12_CON_TIPO" , 
+  "EUROPA_radio_12_SIN_TIPO" ,  "EUROPA_radio_18_CON_TIPO",   "EUROPA_radio_18_SIN_TIPO"  ,
+  "EUROPA_radio_20_CON_TIPO"  , "EUROPA_radio_20_SIN_TIPO"  , "EUROPA_radio_24_CON_TIPO"  ,
+  "EUROPA_radio_24_SIN_TIPO",   "EUROPA_radio_30_CON_TIPO",   "EUROPA_radio_30_SIN_TIPO" , 
+ "EUROPA_radio_36_CON_TIPO" ,  "EUROPA_radio_36_SIN_TIPO" ,  "EUROPA_radio_42_CON_TIPO",  
+  "EUROPA_radio_42_SIN_TIPO",   "EUROPA_radio_48_CON_TIPO" ,  "EUROPA_radio_48_SIN_TIPO" , 
+  "EUROPA_radio_50_CON_TIPO",   "EUROPA_radio_50_SIN_TIPO",   "EUROPA_radio_54_CON_TIPO" , 
+  "EUROPA_radio_54_SIN_TIPO" ,  "EUROPA_radio_60_CON_TIPO" ,  "EUROPA_radio_60_SIN_TIPO" )
 
 # Identificar las columnas que NO son target (identificadores + taxa)
 # Para LATAM
-id_cols <- c("id_sample", "entity_name","n_averaged", "latitude", "longitude", 
-                   "elevation", "hill_n2")
+id_cols <- c("id_sample"   ,               "entity_name"    ,            "latitude" ,                 
+   "longitude"    ,              "elevation"         ,         "sample_category" )
 ```
 
 
 
 ```{r}
 #=========== LATAM ========
-taxa_cols_latam <- setdiff(names(latam_extraction), 
-                          c(id_cols, target_cols))
+taxa_cols_latam <- setdiff(names(latam_extraction), c(id_cols, target_cols_latam))
 # Crear una lista de dataframes para LATAM, cada uno con un target diferente
 latam_target_list <- list()
-
-for (target in target_cols) {
+for (target in target_cols_latam) {
   # Seleccionar: identificadores + el target actual + todas las taxa
   latam_target_list[[target]] <- latam_extraction %>%
     select(all_of(c(id_cols, target, taxa_cols_latam)))
@@ -89,12 +118,10 @@ for (target in target_cols) {
 
 
 #======= EUROPE ========
-taxa_cols_europe <- setdiff(names(europe_extraction), 
-                          c(id_cols, target_cols))
+taxa_cols_europe <- setdiff(names(europe_extraction), c(id_cols, target_cols_europe))
 
 europe_target_list <- list()
-
-for (target in target_cols) {
+for (target in target_cols_europe) {
   # Seleccionar: identificadores + el target actual + todas las taxa
   europe_target_list[[target]] <- europe_extraction %>%
     select(all_of(c(id_cols, target, taxa_cols_europe)))
@@ -102,138 +129,22 @@ for (target in target_cols) {
 
 
 
+# Calcular varianza y frecuencia
+nzv_metrics <- nearZeroVar(europe_extraction[, taxa_cols_europe], 
+                           freqCut = 95/5,  # Valor más frecuente >95%, segundo <5%
+                           uniqueCut = 10,   # Número de valores únicos
+                           saveMetrics = TRUE)
 
-latam_target_list[["Tree_Point"]]
-europe_target_list[["Tree_Point"]]
-```
+# Ver cuántos taxones se van a eliminar
+cat("Taxones totales:", length(taxa_cols_europe), "\n")
+cat("Taxones a eliminar:", sum(nzv_metrics$nzv), "\n")
 
+# Eliminar taxones con varianza cercana a cero
+taxa_cols_europe <- setdiff(taxa_cols_europe, 
+                            rownames(nzv_metrics)[nzv_metrics$nzv == TRUE])
 
+cat("Taxones que se mantienen:", length(taxa_cols_europe), "\n")
 
-```{r}
-#test_Tree_Point <- latam_target_list[["Tree_Point"]]
-
-#target_running <-  "Tree_Point"
-
-#modern_latam <- test_Tree_Point |> 
- # filter(.data[[target_running]] > 0) |>
-  #pivot_longer(cols = -c(id_sample:target_running),names_to = "taxa") |> filter(value > 0)
-
-#aux2 <- modern_latam |> group_by(taxa) |> mutate(count_taxa = n()) |> ungroup() |> filter(count_taxa >= 10) |> dplyr::select(-count_taxa)
-
-#modern_latam <- aux2 |> group_by(id_sample) |> 
- # mutate(value = value / sum(value)) |> ungroup() |> arrange(taxa) |> 
- # pivot_wider(id_cols = c(id_sample:target_running), names_from = "taxa",values_fill = 0) |>
- # select(where(is.numeric)) |> dplyr::group_by(latitude,longitude) |> 
- # dplyr::summarise_all(mean) |> dplyr::ungroup() |> dplyr::mutate(id_sample = paste0("ID_",dplyr::row_number())) |>
- # dplyr::select(id_sample,everything())
-```
-
-
-
-
-```{r}
-# Procesar toda la lista de LATAM con promediado por lat/lon
-latam_prepared <- map2(
-  latam_target_list,
-  names(latam_target_list),
-  ~ {
-    df <- .x
-    target <- .y
-    
-    cat("Procesando LATAM -", target, "\n")
-    
-    # 1. Pivot longer (excluyendo columnas desde id_sample hasta target)
-    modern_long <- df %>%
-      filter(.data[[target]] > 0) |>   # ya filtras target > 0
-      pivot_longer(cols = -c(id_sample:all_of(target)), names_to = "taxa") %>%
-      filter(value > 0)
-    
-    # 2. Filtrar taxa con >= 10 ocurrencias
-    taxa_keep <- modern_long %>%
-      group_by(taxa) %>%
-      summarise(n = n(), .groups = "drop") %>%
-      filter(n >= 10) %>%
-      pull(taxa)
-    
-    # 3. Re-normalizar y pivot wide
-    modern_wide <- modern_long %>%
-      filter(taxa %in% taxa_keep) %>%
-      group_by(id_sample) %>%
-      mutate(value = value / sum(value)) %>%
-      ungroup() %>%
-      arrange(taxa) %>%
-      pivot_wider(
-        id_cols = c(id_sample:all_of(target)),
-        names_from = "taxa",
-        values_from = "value",
-        values_fill = 0
-      )
-    
-    # 4. Promediar por lat/lon, conservando entity_name y conteo de muestras
-    modern_wide %>%
-      group_by(latitude, longitude) %>%
-      summarise(
-        # Promediar todas las columnas numéricas (incluye target y taxa)
-        across(where(is.numeric), mean, .names = "{.col}"),
-        # Conservar el primer entity_name (puedes cambiar por paste(unique(entity_name), collapse="; ") si prefieres)
-        entity_name = first(entity_name),
-        # Número de muestras originales que se promediaron
-        n_averaged = n(),
-        .groups = "drop"
-      ) %>%
-      mutate(id_sample = paste0("ID_", row_number())) %>%
-      # Reordenar columnas: id_sample, entity_name, n_averaged, lat, lon, el resto
-      select(id_sample, entity_name, n_averaged, latitude, longitude, everything())
-  }
-)
-```
-
-
-
-
-```{r}
-#test_Tree_Point <- europe_target_list[["Tree_Point"]]
-
-#target_running <-  "Tree_Point"
-
-#modern_europe <- test_Tree_Point |> select(where(is.numeric)) |> dplyr::group_by(latitude,longitude) |> dplyr::summarise_all(mean) |> dplyr::ungroup() |> 
- # dplyr::mutate(id_sample = paste0("ID_",dplyr::row_number())) |> dplyr::select(id_sample,everything())
-  
-```
-
-```{r}
-# Procesar EUROPE - SOLO promediar por lat/lon (sin procesamiento de polen)
-europe_prepared <- map2(
-  europe_target_list,
-  names(europe_target_list),
-  ~ {
-    df <- .x
-    target <- .y
-    
-    cat("Procesando EUROPE -", target, "\n")
-    
-    # Agrupar por lat/lon y resumir
-    df %>%
-      filter(!is.na(.data[[target]])) %>%   # <- eliminar filas con NA en la columna target
-      group_by(latitude, longitude) %>%
-      summarise(
-        # Promediar todas las columnas numéricas
-        across(where(is.numeric), mean, .names = "{.col}"),
-        # Conservar el primer entity_name (o concatenar todos si prefieres)
-        entity_name = first(entity_name),
-        # Número de muestras originales que se promediaron
-        n_averaged = n(),
-        .groups = "drop"
-      ) %>%
-      mutate(id_sample = paste0("ID_", row_number())) %>%
-      # Reordenar columnas: id_sample, entity_name, n_averaged, lat, lon, el resto
-      select(id_sample, entity_name, n_averaged, latitude, longitude, everything())
-  }
-)
-
-# Verificar resultados
-names(europe_prepared)
-glimpse(europe_prepared[["Tree_Point"]], width = 1)
 ```
 
 
@@ -241,93 +152,53 @@ glimpse(europe_prepared[["Tree_Point"]], width = 1)
 
 Chunk 1: Extraer componentes para LATAM
 ```{r}
-# Extraer componentes para LATAM
-latam_twapls_data <- map2(
-  latam_prepared,
-  names(latam_prepared),
-  ~ {
-    df <- .x
-    target <- .y
-    
-    # Identificar columnas fijas (no son taxa)
-    id_cols_present <- intersect(id_cols, names(df))
-    
-    # El target y las columnas fijas se excluyen de las taxa
-    exclude <- c(id_cols_present, target)
-    taxa_cols <- setdiff(names(df), exclude)
-    
-    list(
-      taxa = df %>% select(all_of(taxa_cols)),
-      target = df[[target]],
-      coords = df %>% select(longitude, latitude),
-      ids = df$id_sample
-    )
-  }
-)
+# Correct way to create the list for LATAM
+latam_twapls_data <- list()
+
+for (target in target_cols_latam) {
+  # Select columns for this target
+  df_temp <- latam_extraction %>%
+    select(all_of(c(id_cols, target, taxa_cols_latam)))
+  
+  latam_twapls_data[[target]] <- list(
+    taxa = df_temp %>% select(all_of(taxa_cols_latam)),
+    target = df_temp[[target]],
+    coords = df_temp %>% select(longitude, latitude),
+    ids = df_temp$id_sample
+  )
+}
+
+# Similarly for EUROPE
+europe_twapls_data <- list()
+for (target in target_cols_europe) {
+  df_temp <- europe_extraction %>%
+    select(all_of(c(id_cols, target, taxa_cols_europe)))
+  
+  europe_twapls_data[[target]] <- list(
+    taxa = df_temp %>% select(all_of(taxa_cols_europe)),
+    target = df_temp[[target]],
+    coords = df_temp %>% select(longitude, latitude),
+    ids = df_temp$id_sample
+  )
+}
 ```
 
-
-
-Chunk 1: Extraer componentes para EUROPE
-```{r}
-# Limpiar datos de EUROPE - eliminar NA y taxa con varianza cero
-europe_twapls_data_clean <- map2(
-  europe_twapls_data,
-  names(europe_twapls_data),
-  ~ {
-    cat("Limpiando EUROPE -", .y, "\n")
-    
-    # 1. Identificar filas con NA en target
-    na_rows <- is.na(.x$target)
-    if (sum(na_rows) > 0) {
-      cat("  Eliminando", sum(na_rows), "filas con NA en target\n")
-    }
-    
-    # 2. Filtrar filas con NA en target
-    taxa_clean <- .x$taxa[!na_rows, ]
-    target_clean <- .x$target[!na_rows]
-    coords_clean <- .x$coords[!na_rows, ]
-    ids_clean <- .x$ids[!na_rows]
-    
-    # 3. Eliminar taxa con varianza cero (constantes)
-    taxa_var <- apply(taxa_clean, 2, var, na.rm = TRUE)
-    zero_var_taxa <- names(taxa_var[taxa_var == 0])
-    
-    if (length(zero_var_taxa) > 0) {
-      cat("  Eliminando", length(zero_var_taxa), "taxas con varianza cero\n")
-      taxa_clean <- taxa_clean[, !colnames(taxa_clean) %in% zero_var_taxa]
-    }
-    
-    # 4. Verificar que no haya quedado ninguna columna con varianza cero
-    taxa_var_after <- apply(taxa_clean, 2, var, na.rm = TRUE)
-    if (any(taxa_var_after == 0)) {
-      cat("  ADVERTENCIA: Aún hay taxa con varianza cero\n")
-    }
-    
-    cat("  Dimensiones finales: taxa =", dim(taxa_clean), 
-        ", target =", length(target_clean), "\n")
-    
-    list(
-      taxa = taxa_clean,
-      target = target_clean,
-      coords = coords_clean,
-      ids = ids_clean
-    )
-  }
-)
-
-# Verificar que funcionó
-names(europe_twapls_data_clean)
-europe_twapls_data_clean[["Tree_Point"]]$target[1:10]
-```
 
 
 
 Chunk 2: Configurar paralelización y ejecutar TWAPLS para LATAM
 
+
 ```{r, warning=FALSE}
-# Número de CPUs
-CPUS <- 8
+# Set sequential processing globally
+library(future)
+plan(sequential)
+
+total_cores <- parallel::detectCores()
+# Opción 3: Usar 7 (la mitad, pero podría tener problemas)
+CPUS <- floor(total_cores / 2)  7
+
+
 
 # Ejecutar TWAPLS para LATAM (todos los targets)
 latam_results <- map2(
@@ -415,6 +286,7 @@ latam_results <- map2(
     )
   }
 )
+
 ```
 
 
@@ -422,128 +294,354 @@ latam_results <- map2(
 saveRDS(latam_results, file = paste(my_path,"latam_tree_recons_results_",iteration,".rds", sep=""))
 ```
 
-
-
-Ahora para EUROPA
+## EUROPE
 
 ```{r}
-# Número de CPUs
+# Set sequential processing globally
+library(future)
+plan(sequential)
+
+total_cores <- parallel::detectCores()
+
 CPUS <- 8
 
-# Ejecutar TWAPLS para EUROPE (todos los targets) - CON DATOS LIMPIOS
-europe_results <- map2(
-  europe_twapls_data_clean,
-  names(europe_twapls_data_clean),
-  ~ {
-    cat("\n=== EUROPE -", .y, "===\n")
+
+# ============================================================
+# MATRIZ DE DISTANCIAS DE EUROPE
+# ============================================================
+# Las coordenadas son las mismas para todos los escenarios,
+# por lo que calculamos las distancias UNA SOLA VEZ.
+
+coords_europe <- europe_twapls_data[[1]]$coords
+
+dist_mat_europe <- get_distance(
+  coords_europe,
+  cpus = CPUS
+)
+
+cat("\n=== Matriz de distancias de EUROPE calculada ===\n")
+
+
+saveRDS(
+  dist_mat_europe,
+  file = paste(
+    my_path,
+    "europe_distance_matrix_",
+    iteration,
+    ".rds",
+    sep = ""
+  )
+)
+
+
+
+dist_mat_europe <- readRDS(file = paste(
+    my_path,
+    "europe_distance_matrix_",
+    iteration,
+    ".rds",
+    sep = ""
+  ))
+```
+
+
+```{r, warning=FALSE}
+# ============================================================
+# EUROPE: UN ESCENARIO A LA VEZ
+# ============================================================
+
+for (target_name in names(europe_twapls_data)) {
+  
+  cat("\n")
+  cat("========================================\n")
+  cat("=== EUROPE -", target_name, "===\n")
+  cat("========================================\n")
+  
+  
+  # ----------------------------------------------------------
+  # Archivo donde se guardará este escenario
+  # ----------------------------------------------------------
+  
+  output_file <- paste(
+    my_path,
+    "europe_",
+    target_name,
+    "_",
+    iteration,
+    ".rds",
+    sep = ""
+  )
+  
+  
+  # ----------------------------------------------------------
+  # Si ya existe, no recalcular
+  # ----------------------------------------------------------
+  
+  if (file.exists(output_file)) {
     
-    taxa <- .x$taxa
-    target <- .x$target
-    coords <- .x$coords
+    cat(
+      "-> Este escenario ya existe.\n",
+      "-> Se salta y continúa con el siguiente.\n"
+    )
     
-    # Verificar que target tiene valores válidos
-    if (length(target) < 10) {
-      cat("  -> ADVERTENCIA: Menos de 10 valores en target. Saltando...\n")
-      return(NULL)
-    }
+    next
+  }
+  
+  
+  # ----------------------------------------------------------
+  # Extraer datos del escenario
+  # ----------------------------------------------------------
+  
+  data_current <- europe_twapls_data[[target_name]]
+  
+  taxa <- data_current$taxa
+  target <- data_current$target
+  coords <- data_current$coords
+  
+  
+  # ----------------------------------------------------------
+  # 1. Ajuste del modelo
+  # ----------------------------------------------------------
+  
+  cat("1. Ajustando TWAPLS...\n")
+  
+  fit <- TWAPLS.w2(
+    taxa,
+    target,
+    nPLS = 5,
+    usefx = TRUE,
+    fx_method = "pspline",
+    bin = 2.5
+  )
+  
+  
+  # ----------------------------------------------------------
+  # 2. Pseudo-sitios
+  #
+  # IMPORTANTE:
+  # Se calcula nuevamente para cada escenario
+  # porque depende de 'target'
+  # ----------------------------------------------------------
+  
+  cat("2. Calculando pseudo-sitios...\n")
+  
+  pseudo <- get_pseudo(
+    dist_mat_europe,
+    target,
+    cpus = CPUS
+  )
+  
+  
+  # ----------------------------------------------------------
+  # 3. Validación cruzada
+  # ----------------------------------------------------------
+  
+  cat("3. Ejecutando validación cruzada...\n")
+  
+  cv_res <- cv.pr.w(
+    taxa,
+    target,
+    nPLS = 5,
+    TWAPLS.w2,
+    TWAPLS.predict.w,
+    pseudo = pseudo,
+    usefx = TRUE,
+    fx_method = "pspline",
+    bin = 2.5,
+    cpus = CPUS,
+    test_mode = FALSE
+  ) %>% pb()
+  
+  
+  # ----------------------------------------------------------
+  # 4. Test aleatorio
+  # ----------------------------------------------------------
+  
+  cat("4. Ejecutando randomisation test...\n")
+  
+  rand_test <- rand.t.test.w(
+    cv_res,
+    n.perm = 999
+  ) %>%
+    as_tibble() %>%
+    mutate(comp = row_number())
+  
+  
+  # ----------------------------------------------------------
+  # 5. Mejor componente
+  # ----------------------------------------------------------
+  
+  best_comp <- rand_test %>%
+    filter(p < 0.01) %>%
+    slice_min(RMSEP) %>%
+    pull(comp)
+  
+  
+  p_val <- rand_test %>%
+    filter(p < 0.01) %>%
+    slice_min(RMSEP) %>%
+    pull(p)
+  
+  
+  if (length(best_comp) == 0) {
     
-    # Calcular rango del target
-    target_range <- diff(range(target, na.rm = TRUE))
-    cat("  Rango de target:", target_range, "\n")
-    
-    # Ajustar bin según el rango
-    if (target_range < 0.05) {
-      bin_value <- 0.01
-      cat("  Rango pequeño, usando bin =", bin_value, "\n")
-    } else {
-      bin_value <- 0.05
-      cat("  Usando bin =", bin_value, "\n")
-    }
-    
-    # 1. Ajuste del modelo
-    fit <- TWAPLS.w2(taxa, target, nPLS = 5, 
-                     usefx = TRUE, fx_method = "pspline", bin = bin_value)
-    
-    # 2. Matriz de distancias
-    dist_mat <- get_distance(coords, cpus = CPUS)
-    
-    # 3. Pseudo‑sitios para validación cruzada
-    pseudo <- get_pseudo(dist_mat, target, cpus = CPUS)
-    
-    # 4. Validación cruzada
-    cv_res <- cv.pr.w(taxa, target, nPLS = 5,
-                      TWAPLS.w2,
-                      TWAPLS.predict.w,
-                      pseudo = pseudo,
-                      usefx = TRUE,
-                      fx_method = "pspline",
-                      bin = bin_value,
-                      cpus = CPUS,
-                      test_mode = FALSE) %>% pb()
-    
-    # 5. Test aleatorio de permutaciones
-    rand_test <- rand.t.test.w(cv_res, n.perm = 999) %>%
-      as_tibble() %>%
-      mutate(comp = row_number())
-    
-    # 6. Mejor componente
     best_comp <- rand_test %>%
-      filter(p < 0.01) %>%
       slice_min(RMSEP) %>%
       pull(comp)
     
-    p_val <- rand_test %>%
-      filter(p < 0.01) %>%
-      slice_min(RMSEP) %>%
-      pull(p)
-    
-    if (length(best_comp) == 0) {
-      best_comp <- rand_test %>% slice_min(RMSEP) %>% pull(comp)
-      p_val <- rand_test %>% slice_min(RMSEP) %>% pull(p)
-      cat("  -> Ningún componente significativo, se usa el de menor RMSEP (comp", best_comp, ")\n")
-    } else {
-      cat("  -> Mejor componente:", best_comp, "\n")
-    }
-    
-    # 7. Observados vs predichos
-    obs_pred <- data.frame(
-      Observed = cv_res$test.x,
-      Predicted = cv_res[[paste0("comp", best_comp)]]
+    cat(
+      "  -> Ningún componente significativo,",
+      "se usa el de menor RMSEP (comp", 
+      best_comp, ")\n"
     )
     
-    # 8. Métricas de rendimiento
-    rmsep <- sqrt(mean((obs_pred$Observed - obs_pred$Predicted)^2, na.rm = TRUE))
-    r2 <- cor(obs_pred$Observed, obs_pred$Predicted, use = "complete.obs")^2
+  } else {
     
-    performance <- tibble(
-      region = "EUROPE",
-      target = .y,
-      best_comp = best_comp,
-      p_val = p_val,
-      RMSEP = rmsep,
-      R2 = r2,
-      n_samples = length(target),
-      bin_used = bin_value
-    )
-    
-    list(
-      target = .y,
-      region = "EUROPE",
-      cv = cv_res,
-      rand_test = rand_test,
-      best_comp = best_comp,
-      obs_pred = obs_pred,
-      performance = performance
+    cat(
+      "  -> Mejor componente:",
+      best_comp,
+      "\n"
     )
   }
+  
+  
+  # ----------------------------------------------------------
+  # 6. Observados vs predichos
+  # ----------------------------------------------------------
+  
+  obs_pred <- data.frame(
+    Observed = cv_res$test.x,
+    Predicted = cv_res[[paste0("comp", best_comp)]]
+  )
+  
+  
+  # ----------------------------------------------------------
+  # 7. Métricas
+  # ----------------------------------------------------------
+  
+  rmsep <- sqrt(
+    mean(
+      (obs_pred$Observed - obs_pred$Predicted)^2
+    )
+  )
+  
+  r2 <- cor(
+    obs_pred$Observed,
+    obs_pred$Predicted
+  )^2
+  
+  
+  performance <- tibble(
+    region = "EUROPE",
+    target = target_name,
+    best_comp = best_comp,
+    p_val = p_val,
+    RMSEP = rmsep,
+    R2 = r2
+  )
+  
+  
+  # ----------------------------------------------------------
+  # 8. Crear resultado
+  # ----------------------------------------------------------
+  
+  result <- list(
+    target = target_name,
+    region = "EUROPE",
+    cv = cv_res,
+    rand_test = rand_test,
+    best_comp = best_comp,
+    obs_pred = obs_pred,
+    performance = performance
+  )
+  
+  
+  # ----------------------------------------------------------
+  # 9. GUARDAR INMEDIATAMENTE
+  # ----------------------------------------------------------
+  
+  saveRDS(
+    result,
+    output_file
+  )
+  
+  cat(
+    ">>> ESCENARIO GUARDADO:",
+    target_name,
+    "\n"
+  )
+  
+  cat(
+    ">>> Archivo:",
+    output_file,
+    "\n"
+  )
+}
+```
+
+
+
+```{r}
+# ============================================================
+# RECONSTRUIR EUROPE_RESULTS
+# ============================================================
+
+europe_files <- list.files(
+  path = my_path,
+  pattern = paste0(
+    "^europe_EUROPA.*_",
+    iteration,
+    "\\.rds$"
+  ),
+  full.names = TRUE
 )
 
-# Eliminar resultados NULL (targets que fallaron)
-europe_results <- europe_results[!sapply(europe_results, is.null)]
 
-# Verificar resultados
-names(europe_results)
+europe_results <- lapply(
+  europe_files,
+  readRDS
+)
+
+
+names(europe_results) <- sapply(
+  europe_results,
+  function(x) x$target
+)
+
+
+europe_performance <- purrr::map_dfr(
+  europe_results,
+  ~ .x$performance
+)
+
+europe_performance
+
+
+europe_rand <- purrr::map_dfr(
+  europe_results,
+  ~ .x$rand_test |> 
+    mutate(target = .x$target, .before = 1)
+)
+
+europe_rand
 ```
+
+
+
+```{r}
+write.csv(europe_rand, file = "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Output_calibration_and_reconstruction/europe_rand_test_i3.csv")
+```
+
+
+
+
+
+
+
+
+
+
+
 
 
 ```{r}
@@ -553,7 +651,7 @@ saveRDS(europe_results, file = paste(my_path,"europe_tree_recons_results_",itera
 
 
 ```{r}
-latam_results <- readRDS("Data/Processed/Output_calibration_and_reconstruction/latam_tree_recons_re")
+latam_results <- readRDS("Data/Processed/Output_calibration_and_reconstruction/latam_tree_recons_results_i3.rds")
 ```
 
 
@@ -565,6 +663,8 @@ Chunk 1: Identificar el mejor target
 ```{r}
 # LATAM - identificar mejor target (menor RMSEP)
 latam_performance <- map_dfr(latam_results, ~ .x$performance)
+
+latam_random_test <- map_dfr(latam_results, ~ .x$rand_test)
 
 best_latam_target <- latam_performance %>% slice_min(RMSEP) %>% pull(target)
 
@@ -594,6 +694,10 @@ cat("Mejor target en EUROPE:", best_europe_target)
 
 
 
+```{r}
+write.csv(latam_random_test, 
+          file = "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Output_calibration_and_reconstruction/latam_rand_test_i3.csv")
+```
 
 
 ```{r}
@@ -612,7 +716,7 @@ Chunk 2: Crear dataframe diagnóstico para LATAM (mejor target)
 latam_best_result <- latam_results[[best_latam_target]]
 
 # Extraer los datos preparados originales para ese target
-latam_best_data <- latam_prepared[[best_latam_target]]
+latam_best_data <- latam_extraction[[best_latam_target]]
 
 
 # Verificar que tienen el mismo número de filas
@@ -638,9 +742,9 @@ latam_diagnostic <- latam_best_data %>%
   # Agregar columna de diagnóstico de calidad
   mutate(
     Quality = case_when(
-      Abs_Residual < 0.1 ~ "Excellent",
-      Abs_Residual < 0.2 ~ "Good",
-      Abs_Residual < 0.3 ~ "Regular",
+      Abs_Residual < 0.10 ~ "Excellent",
+      Abs_Residual < 0.20 ~ "Good",
+      Abs_Residual < 0.30 ~ "Regular",
       TRUE ~ "Poor"
     )
   ) %>%
@@ -686,9 +790,9 @@ europe_diagnostic <- europe_best_data %>%
   # Agregar columna de diagnóstico de calidad
   mutate(
     Quality = case_when(
-      Abs_Residual < 0.1 ~ "Excellent",
-      Abs_Residual < 0.2 ~ "Good",
-      Abs_Residual < 0.3 ~ "Regular",
+      Abs_Residual < 0.10 ~ "Excellent",
+      Abs_Residual < 0.20 ~ "Good",
+      Abs_Residual < 0.30 ~ "Regular",
       TRUE ~ "Poor"
     )
   ) %>%
@@ -708,12 +812,12 @@ head(europe_diagnostic[, 1:15])
 # LATAM - mejores y peores predicciones
 latam_best_sites <- latam_diagnostic %>%
   arrange(Abs_Residual) %>%
-  select(id_sample, entity_name, latitude, longitude, elevation, Observed, Predicted, Abs_Residual, Quality) %>%
+  select( Observed, Predicted, Abs_Residual, Quality) %>%
   head(100)
 
 latam_worst_sites <- latam_diagnostic %>%
   arrange(desc(Abs_Residual)) %>%
-  select(id_sample, entity_name, latitude, longitude, elevation, Observed, Predicted, Abs_Residual, Quality) %>%
+  select(, Observed, Predicted, Abs_Residual, Quality) %>%
   head(100)
 
 # EUROPE - mejores y peores predicciones
