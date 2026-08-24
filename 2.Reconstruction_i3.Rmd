@@ -600,40 +600,62 @@ cv_targets_latam <- purrr::imap(
 
 Cargar los archivos individuales 
 ```{r}
-cv_path <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Output_calibration_and_reconstruction/Cross_validation/"
-bin = 2.5
+cv_path <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Output_calibration_and_reconstruction/Cross_validation/europe_bin5/"
+bin = 5
 
 cv_files_europe <- list.files(
   cv_path,
-  pattern = "^cv_europe_Tree_Gaussian_.*_bin2.5_i3\\.csv$",
-  full.names = TRUE
-)
+  pattern = "^cv_europe_Tree_Gaussian_.*_bin5_i3.1\\.csv$",
+  full.names = TRUE)
 
 basename(cv_files_europe)
 length(cv_files_europe)
-```
 
-```{r}
 
 
 target_names_europe <- basename(cv_files_europe) |>
   stringr::str_remove("^cv_europe_") |>
-  stringr::str_remove("_bin2\\.5_i3\\.csv$")
-```
+  stringr::str_remove("_bin5\\.5_i3.1\\.csv$")
 
-4. Reconstruir la lista cv_targets_latam
-```{r}
+
+#4. Reconstruir la lista cv_targets europe
 cv_targets_europe <- cv_files_europe |>
-  purrr::map(
-    readr::read_csv,
-    show_col_types = FALSE
-  ) |>
-  rlang::set_names(target_names_europe)
+  purrr::map(readr::read_csv, show_col_types = FALSE) |> rlang::set_names(target_names_europe)
 
 
 cv_targets_europe <- cv_targets_europe |>
   purrr::map(as.data.frame)
 ```
+
+
+```{r}
+cv_path <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Output_calibration_and_reconstruction/Cross_validation/latam_bin3.5/"
+bin = 5
+
+cv_files_latam <- list.files(
+  cv_path,
+  pattern = "^cv_latam_Tree_Gaussian_.*_bin3.5_i3.1\\.csv$",
+  full.names = TRUE)
+
+basename(cv_files_latam)
+length(cv_files_latam)
+
+
+
+target_names_latam <- basename(cv_files_latam) |>
+  stringr::str_remove("^cv_europe_") |>
+  stringr::str_remove("_bin3.5\\.5_i3.1\\.csv$")
+
+
+#4. Reconstruir la lista cv_targets europe
+cv_targets_latam <- cv_files_latam |>
+  purrr::map(readr::read_csv, show_col_types = FALSE) |> rlang::set_names(target_names_latam)
+
+
+cv_targets_latam <- cv_targets_latam |>
+  purrr::map(as.data.frame)
+```
+
 
 
 Random t-test 
@@ -702,11 +724,9 @@ rand_table_all <- bind_rows(
 
 
 ```{r}
-write.csv(rand_table_europe, file.path(cv_path, paste0("random_t_test_europe_bin5_", iteration, ".csv")),
-          row.names = FALSE)
+write.csv(rand_table_europe, "Data/Processed/Output_calibration_and_reconstruction/Cross_validation/random_t_test_europe_bin5.csv", row.names = FALSE)
 
-write.csv(rand_table_latam, file.path(cv_path, paste0("random_t_test_latam_bin5_", iteration, ".csv")),
-          row.names = FALSE)
+write.csv(rand_table_latam, "Data/Processed/Output_calibration_and_reconstruction/Cross_validation/random_t_test_latam_bin3.5.csv", row.names = FALSE)
 
 ```
 
@@ -714,12 +734,8 @@ write.csv(rand_table_latam, file.path(cv_path, paste0("random_t_test_latam_bin5_
 ```{r}
 write.csv(
   rand_table_all,
-  file.path(
-    cv_path,
-    paste0("random_t_test_all_regions_bin2.5latam_and_2europe", iteration, ".csv")
-  ),
-  row.names = FALSE
-)
+  "Data/Processed/Output_calibration_and_reconstruction/Cross_validation/random_t_test_all_regions_bin3.5latam_and_5europe.csv",
+  row.names = FALSE)
 ```
 
 
