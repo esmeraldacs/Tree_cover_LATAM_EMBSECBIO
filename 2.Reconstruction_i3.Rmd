@@ -78,9 +78,10 @@ my_path <-"Data/Processed/Output_calibration_and_reconstruction/"
 
 ```{r}
 # Load data (as before)
-europe_extraction <- readRDS("Data/Processed/tree_gaussian_EUROPA_25_50km_modern_pollen.rds") |>
-  select(id_sample:hill_n2, starts_with("Tree_"), everything())
-#set.seed(9751); europe_extraction <- sample_n(europe_extraction, size = 250)
+europe_extraction <- readRDS("Data/Processed/tree_gaussian_EUROPAsmpdsv3_25_50km_modern_pollen.rds") |>
+  select(-entity_type, -site_type) |>
+  select(id_sample:elevation, starts_with("Tree_"), everything())
+#set.seed(9751); europe_extraction <- sa`mple_n(europe_extraction, size = 250)
 
 latam_extraction <- readRDS("Data/Processed/tree_gaussian_LATAM_25_50km_modern_pollen.rds") |>
   select(id_sample:hill_n2, starts_with("Tree_"), everything())
@@ -102,7 +103,7 @@ target_cols <- c( "Tree_Gaussian_50_sigma100", "Tree_Gaussian_50_sigma10",  "Tre
 
 # Identificar las columnas que NO son target (identificadores + taxa)
 # Para LATAM
-id_cols <- c("id_sample" ,    "latitude" ,        "longitude"    ,    "elevation"         ,     "hill_n2" )
+id_cols <- c("id_sample" ,    "latitude" ,        "longitude"       ,"elevation"     )
 ```
 
 
@@ -142,7 +143,7 @@ for (target in target_cols) {
 
 
 
-latam_target_list[["Tree_Gaussian_25_sigma2"]]
+#latam_target_list[["Tree_Gaussian_25_sigma2"]]
 europe_target_list[["Tree_Gaussian_25_sigma2"]]
 ```
 
@@ -161,7 +162,7 @@ europe_target_list <- europe_target_list |>
       filter(!is.na(.data[[target]]))
   )
 
-latam_target_list[["Tree_Gaussian_25_sigma2"]]
+#latam_target_list[["Tree_Gaussian_25_sigma2"]]
 europe_target_list[["Tree_Gaussian_25_sigma2"]]
 ```
 
@@ -215,10 +216,6 @@ latam_twapls_data[["Tree_Gaussian_25_sigma2"]]$target
 ```
 
 
-```{r}
-saveRDS(latam_twapls_data, "Data/Processed/Output_calibration_and_reconstruction/latam_twapls_data.rds")
-
-```
 
 
 ```{r}
@@ -250,10 +247,6 @@ europe_twapls_data[["Tree_Gaussian_25_sigma2"]]$taxa
 ```
 
 
-```{r}
-saveRDS(europe_twapls_data, "Data/Processed/Output_calibration_and_reconstruction/europe_twapls_data.rds")
-
-```
 
 
 
@@ -291,9 +284,9 @@ p2.5 <- ggplot(target_df, aes(target)) +
   labs(title = "bin = 2.5")
 
 p5 <- ggplot(target_df, aes(target)) +
-  geom_histogram(binwidth = 5, boundary = 0) +
+  geom_histogram(binwidth = 3, boundary = 0) +
   theme_classic() +
-  labs(title = "bin = 5")
+  labs(title = "bin = 3")
 
 p10 <- ggplot(target_df, aes(target)) +
   geom_histogram(binwidth = 10, boundary = 0) +
@@ -365,7 +358,7 @@ fit_targets_europe <- europe_twapls_data |>
         nPLS = 5,
         usefx = TRUE,
         fx_method = "pspline",
-        bin = 2
+        bin = 3
       )
     }
   )
@@ -402,7 +395,7 @@ Because samples with missing target values were removed independently for each t
 
 Pairwise geographic distances were calculated from sample longitude and latitude using get_distance(). The resulting distance matrix and the corresponding tree-cover target were then supplied to get_pseudo(). During cross-validation, the test sample and its associated pseudo-sites can be excluded from model training, providing a more conservative assessment of predictive performance by reducing the contribution of geographically close samples with similar tree-cover conditions.
 ```{r}
-CPUS <- 8
+CPUS <- 10
 
 #Distancias para Eruopa
 dist_targets_europe <- europe_twapls_data |>
@@ -436,7 +429,7 @@ pseudo_targets_europe <- purrr::map2(
 
 
 ```{r}
-saveRDS(dist_targets_europe, "Data/Processed/Output_calibration_and_reconstruction/dist_targets_europe.rds")
+saveRDS(dist_targets_europe, "Data/Processed/Output_calibration_and_reconstruction/dist_targets_europeSMPDSv3.rds")
 
 
 saveRDS(pseudo_targets_europe, "Data/Processed/Output_calibration_and_reconstruction/pseudo_targets_europe.rds")
