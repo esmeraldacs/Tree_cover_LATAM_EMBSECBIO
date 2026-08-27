@@ -69,7 +69,7 @@ ggplot() + geom_sf(data = land_polyg_eur)
 1. Setup – define constants and load data
 ```{r}
 iteration <- "i3" 
-my_path <-"Data/Processed/Output_calibration_and_reconstruction/"
+my_path <-"Data/Potential_tree_cover/Output_calibration_and_reconstruction/"
 
 ```
 
@@ -78,13 +78,12 @@ my_path <-"Data/Processed/Output_calibration_and_reconstruction/"
 
 ```{r}
 # Load data (as before)
-europe_extraction <- readRDS("Data/Processed/tree_gaussian_EUROPAsmpdsv3_25_50km_modern_pollen.rds") |>
-  select(-entity_type, -site_type) |>
-  select(id_sample:elevation, starts_with("Tree_"), everything())
+europe_extraction <- readRDS("Data/Potential_tree_cover/extraction_points/potential_tree_gaussian_EUROPA_25_50km_modern_pollen.rds") |>
+  dplyr::select(id_sample:hill_n2, starts_with("Tree_"), everything())
 #set.seed(9751); europe_extraction <- sa`mple_n(europe_extraction, size = 250)
 
-latam_extraction <- readRDS("Data/Processed/tree_gaussian_LATAM_25_50km_modern_pollen.rds") |>
-  select(id_sample:hill_n2, starts_with("Tree_"), everything())
+latam_extraction <- readRDS("Data/Potential_tree_cover/extraction_points/potential_tree_gaussian_LATAM_25_50km_modern_pollen.rds") |>
+  dplyr::select(id_sample:hill_n2, starts_with("Tree_"), everything())
 #set.seed(9751); latam_extraction <- sample_n(latam_extraction, size = 250)
 ```
 
@@ -103,7 +102,7 @@ target_cols <- c( "Tree_Gaussian_50_sigma100", "Tree_Gaussian_50_sigma10",  "Tre
 
 # Identificar las columnas que NO son target (identificadores + taxa)
 # Para LATAM
-id_cols <- c("id_sample" ,    "latitude" ,        "longitude"       ,"elevation"     )
+id_cols <- c("id_sample" ,    "latitude" ,        "longitude"       ,"elevation"   ,"hill_n2"  )
 ```
 
 
@@ -122,7 +121,7 @@ latam_target_list <- list()
 for (target in target_cols) {
   # Seleccionar: identificadores + el target actual + todas las taxa
   latam_target_list[[target]] <- latam_extraction %>%
-    select(all_of(c(id_cols, target, taxa_cols_latam)))
+    dplyr::select(all_of(c(id_cols, target, taxa_cols_latam)))
 }
 
 
@@ -137,7 +136,7 @@ europe_target_list <- list()
 for (target in target_cols) {
   # Seleccionar: identificadores + el target actual + todas las taxa
   europe_target_list[[target]] <- europe_extraction %>%
-    select(all_of(c(id_cols, target, taxa_cols_europe)))
+    dplyr::select(all_of(c(id_cols, target, taxa_cols_europe)))
 }
 
 
@@ -204,9 +203,9 @@ latam_twapls_data <- map2(
     taxa_cols <- setdiff(names(df), exclude)
     
     list(
-      taxa = df %>% select(all_of(taxa_cols)),
+      taxa = df %>% dplyr::select(all_of(taxa_cols)),
       target = df[[target]],
-      coords = df %>% select(longitude, latitude),
+      coords = df %>% dplyr::select(longitude, latitude),
       ids = df$id_sample
     )
   }
@@ -235,15 +234,15 @@ europe_twapls_data <- purrr::map2(
     taxa_cols <- setdiff(names(df), exclude)
     
     list(
-      taxa = df |> select(all_of(taxa_cols)),
+      taxa = df |> dplyr::select(all_of(taxa_cols)),
       target = df[[target]],
-      coords = df |> select(longitude, latitude),
+      coords = df |> dplyr::select(longitude, latitude),
       ids = df$id_sample
     )
   }
 )
 
-europe_twapls_data[["Tree_Gaussian_25_sigma2"]]$taxa
+ range(europe_twapls_data[["Tree_Gaussian_25_sigma2"]]$target)
 ```
 
 
@@ -257,7 +256,7 @@ A bin width of five percentage points was selected as a practical compromise. It
 target_x <- europe_twapls_data[["Tree_Gaussian_25_sigma2"]]$target
 
 
-purrr::map_dfr(c(2.5, 5, 10), \(bin_width) {
+purrr::map_dfr(c(0.05, 0.08, 0.25), \(bin_width) {
     
     breaks_x <- seq(0, ceiling(max(target_x) / bin_width) * bin_width, by = bin_width)
     
@@ -274,37 +273,71 @@ purrr::map_dfr(c(2.5, 5, 10), \(bin_width) {
 target_df <- tibble(target = target_x)
 
 p2 <- ggplot(target_df, aes(target)) +
-  geom_histogram(binwidth = 2, boundary = 0) +
+  geom_histogram(binwidth = 0.05, boundary = 0) +
   theme_classic() +
-  labs(title = "bin = 2.")
+  labs(title = "bin = 0.05")
 
 p2.5 <- ggplot(target_df, aes(target)) +
-  geom_histogram(binwidth = 2.5, boundary = 0) +
+  geom_histogram(binwidth = 0.08, boundary = 0) +
   theme_classic() +
-  labs(title = "bin = 2.5")
+  labs(title = "bin = 0.08")
 
 p5 <- ggplot(target_df, aes(target)) +
-  geom_histogram(binwidth = 3, boundary = 0) +
+  geom_histogram(binwidth = 0.25, boundary = 0) +
   theme_classic() +
-  labs(title = "bin = 3")
+  labs(title = "bin = 0.25")
 
-p10 <- ggplot(target_df, aes(target)) +
-  geom_histogram(binwidth = 10, boundary = 0) +
-  theme_classic() +
-  labs(title = "bin = 10")
 
 p2
+
+
 p2.5
 p5
-p10
+
+
+bin_diagnostic <- purrr::map_dfr(
+  c(0.08, 0.2, 0.25, 0.15),
+  \(bin_width) {
+    
+    breaks_x <- seq(
+      floor(min(target_x) / bin_width) * bin_width,
+      ceiling(max(target_x) / bin_width) * bin_width,
+      by = bin_width
+    )
+    
+    counts <- hist(
+      target_x,
+      breaks = breaks_x,
+      plot = FALSE,
+      include.lowest = TRUE
+    )$counts
+    
+    tibble(
+      bin = bin_width,
+      n_bins = length(counts),
+      empty_bins = sum(counts == 0),
+      percent_empty = mean(counts == 0) * 100,
+      bins_under_3 = sum(counts < 3),
+      percent_under_3 = mean(counts < 3) * 100,
+      bins_under_5 = sum(counts < 5),
+      percent_under_5 = mean(counts < 5) * 100,
+      median_n = median(counts),
+      mean_n = mean(counts),
+      maximum_n = max(counts)
+    )
+  }
+)
+
+bin_diagnostic
 ```
+
 
 
 ```{r}
 target_x <- latam_twapls_data[["Tree_Gaussian_25_sigma2"]]$target
 
 
-purrr::map_dfr(c(2.5, 5, 10), \(bin_width) {
+purrr::map_dfr(c(2, 5, 10), \(bin_width) {
     
     breaks_x <- seq(0, ceiling(max(target_x) / bin_width) * bin_width, by = bin_width)
     
@@ -323,15 +356,10 @@ target_df <- tibble(target = target_x)
 p2 <- ggplot(target_df, aes(target)) +
   geom_histogram(binwidth = 2, boundary = 0) +
   theme_classic() +
-  labs(title = "bin = 2.")
-
-p2.5 <- ggplot(target_df, aes(target)) +
-  geom_histogram(binwidth = 2.5, boundary = 0) +
-  theme_classic() +
-  labs(title = "bin = 2.5")
+  labs(title = "bin = 2")
 
 p5 <- ggplot(target_df, aes(target)) +
-  geom_histogram(binwidth = 5, boundary = 0) +
+  geom_histogram(binwidth = 2, boundary = 0) +
   theme_classic() +
   labs(title = "bin = 5")
 
@@ -344,6 +372,41 @@ p2
 p2.5
 p5
 p10
+
+bin_diagnostic <- purrr::map_dfr(
+  c(1.5, 1, 2, 2.5, 3),
+  \(bin_width) {
+    
+    breaks_x <- seq(
+      floor(min(target_x) / bin_width) * bin_width,
+      ceiling(max(target_x) / bin_width) * bin_width,
+      by = bin_width
+    )
+    
+    counts <- hist(
+      target_x,
+      breaks = breaks_x,
+      plot = FALSE,
+      include.lowest = TRUE
+    )$counts
+    
+    tibble(
+      bin = bin_width,
+      n_bins = length(counts),
+      empty_bins = sum(counts == 0),
+      percent_empty = mean(counts == 0) * 100,
+      bins_under_3 = sum(counts < 3),
+      percent_under_3 = mean(counts < 3) * 100,
+      bins_under_5 = sum(counts < 5),
+      percent_under_5 = mean(counts < 5) * 100,
+      median_n = median(counts),
+      mean_n = mean(counts),
+      maximum_n = max(counts)
+    )
+  }
+)
+
+bin_diagnostic
 ```
 
 
@@ -358,7 +421,7 @@ fit_targets_europe <- europe_twapls_data |>
         nPLS = 5,
         usefx = TRUE,
         fx_method = "pspline",
-        bin = 3
+        bin = 0.2
       )
     }
   )
@@ -374,20 +437,12 @@ fit_targets_latam <- latam_twapls_data |>
         nPLS = 5,
         usefx = TRUE,
         fx_method = "pspline",
-        bin = 2.5
+        bin = 1.5
       )
     }
   )
 ```
 
-
-```{r}
-saveRDS(fit_targets_europe,
-  "Data/Processed/Output_calibration_and_reconstruction/fit_targets_europe_bin2.rds")
-
-saveRDS(fit_targets_latam,
-  "Data/Processed/Output_calibration_and_reconstruction/fit_targets_latam_bin2.5.rds")
-```
 
 
 
@@ -395,7 +450,7 @@ Because samples with missing target values were removed independently for each t
 
 Pairwise geographic distances were calculated from sample longitude and latitude using get_distance(). The resulting distance matrix and the corresponding tree-cover target were then supplied to get_pseudo(). During cross-validation, the test sample and its associated pseudo-sites can be excluded from model training, providing a more conservative assessment of predictive performance by reducing the contribution of geographically close samples with similar tree-cover conditions.
 ```{r}
-CPUS <- 10
+CPUS <- 12
 
 #Distancias para Eruopa
 dist_targets_europe <- europe_twapls_data |>
@@ -425,21 +480,14 @@ pseudo_targets_europe <- purrr::map2(
     )
   }
 )
-```
 
 
-```{r}
-saveRDS(dist_targets_europe, "Data/Processed/Output_calibration_and_reconstruction/dist_targets_europeSMPDSv3.rds")
+saveRDS(dist_targets_europe, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/dist_targets_europe_bin0.2.rds")
 
 
-saveRDS(pseudo_targets_europe, "Data/Processed/Output_calibration_and_reconstruction/pseudo_targets_europe.rds")
-
-```
+saveRDS(pseudo_targets_europe, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/pseudo_targets_europe_bin1.5.rds")
 
 
-
-
-```{r}
 #Distancias para LATAM
 dist_targets_latam <- latam_twapls_data |>
   purrr::imap(
@@ -468,33 +516,32 @@ pseudo_targets_latam <- purrr::map2(
     )
   }
 )
+
+
+saveRDS(dist_targets_latam, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/dist_targets_latam_bin0.2.rds")
+
+
+saveRDS(pseudo_targets_latam, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/pseudo_targets_latam_bin1.5.rds")
 ```
 
-```{r}
-saveRDS(dist_targets_latam, "Data/Processed/Output_calibration_and_reconstruction/dist_targets_latam.rds")
-
-saveRDS(pseudo_targets_latam, "Data/Processed/Output_calibration_and_reconstruction/pseudo_targets_latam.rds")
-```
-
 
 ```{r}
-CPUS <- 9
-iteration <- "i3"
+iteration <- "i4"
 
-cv_path <- "Data/Processed/Output_calibration_and_reconstruction/Cross_validation/"
+cv_path <- "Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/"
 
 dir.create(
   cv_path,
   recursive = TRUE,
   showWarnings = FALSE
 )
-```
 
 
-Validacion cruzada para Europa
+
+#Validacion cruzada para Europa
 
 
-```{r}
+
 cv_targets_europe <- purrr::imap(
   europe_twapls_data,
   \(data, target_name) {
@@ -512,7 +559,7 @@ cv_targets_europe <- purrr::imap(
       pseudo,
       usefx = TRUE,
       fx_method = "pspline",
-      bin = 2,
+      bin = 0.2,
       cpus = CPUS,
       test_mode = FALSE
     ) |>
@@ -525,7 +572,7 @@ cv_targets_europe <- purrr::imap(
         paste0(
           "cv_europe_",
           target_name,
-          "_bin5_",
+          "_bin0.2_",
           iteration,
           ".csv"
         )
@@ -538,16 +585,11 @@ cv_targets_europe <- purrr::imap(
 )
 ```
 
-Validacion cruzada para LATAM
 
 ```{r}
-pseudo_targets_latam <- readRDS("Data/Processed/Output_calibration_and_reconstruction/pseudo_targets_latam.rds")
-
-latam_twapls_data <- readRDS("Data/Processed/Output_calibration_and_reconstruction/latam_twapls_data.rds")
-```
+#Validacion cruzada para LATAM
 
 
-```{r, warning=FALSE}
 cv_targets_latam <- purrr::imap(
   latam_twapls_data,
   \(data, target_name) {
@@ -565,7 +607,7 @@ cv_targets_latam <- purrr::imap(
       pseudo,
       usefx = TRUE,
       fx_method = "pspline",
-      bin = 2.5,
+      bin = 1.5,
       cpus = CPUS,
       test_mode = FALSE
     ) |>
@@ -578,7 +620,7 @@ cv_targets_latam <- purrr::imap(
         paste0(
           "cv_latam_",
           target_name,
-          "_bin5_",
+          "_bin1.5",
           iteration,
           ".csv"
         )
@@ -591,24 +633,25 @@ cv_targets_latam <- purrr::imap(
 )
 ```
 
+
 Cargar los archivos individuales 
 ```{r}
-cv_path <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Output_calibration_and_reconstruction/Cross_validation/europe_bin5/"
-bin = 5
+cv_path <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/"
+
+
 
 cv_files_europe <- list.files(
   cv_path,
-  pattern = "^cv_europe_Tree_Gaussian_.*_bin5_i3.1\\.csv$",
+  pattern = "^cv_europe_Tree_Gaussian_.*_bin0.2_i4\\.csv$",
   full.names = TRUE)
 
 basename(cv_files_europe)
 length(cv_files_europe)
 
 
-
 target_names_europe <- basename(cv_files_europe) |>
   stringr::str_remove("^cv_europe_") |>
-  stringr::str_remove("_bin5\\.5_i3.1\\.csv$")
+  stringr::str_remove("_bin0.2_i4.csv$")
 
 
 #4. Reconstruir la lista cv_targets europe
@@ -622,12 +665,11 @@ cv_targets_europe <- cv_targets_europe |>
 
 
 ```{r}
-cv_path <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Output_calibration_and_reconstruction/Cross_validation/latam_bin3.5/"
-bin = 5
+cv_path <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/"
 
 cv_files_latam <- list.files(
   cv_path,
-  pattern = "^cv_latam_Tree_Gaussian_.*_bin3.5_i3.1\\.csv$",
+  pattern = "^cv_latam_Tree_Gaussian_.*_bin1.5i4\\.csv$",
   full.names = TRUE)
 
 basename(cv_files_latam)
@@ -636,8 +678,8 @@ length(cv_files_latam)
 
 
 target_names_latam <- basename(cv_files_latam) |>
-  stringr::str_remove("^cv_europe_") |>
-  stringr::str_remove("_bin3.5\\.5_i3.1\\.csv$")
+  stringr::str_remove("^cv_latam_") |>
+  stringr::str_remove("_bin1.5i4.csv$")
 
 
 #4. Reconstruir la lista cv_targets europe
@@ -717,9 +759,9 @@ rand_table_all <- bind_rows(
 
 
 ```{r}
-write.csv(rand_table_europe, "Data/Processed/Output_calibration_and_reconstruction/Cross_validation/random_t_test_europe_bin5.csv", row.names = FALSE)
+write.csv(rand_table_europe, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/random_t_test_europe_bin0.2.csv", row.names = FALSE)
 
-write.csv(rand_table_latam, "Data/Processed/Output_calibration_and_reconstruction/Cross_validation/random_t_test_latam_bin3.5.csv", row.names = FALSE)
+write.csv(rand_table_latam, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/random_t_test_latam_bin1.5.csv", row.names = FALSE)
 
 ```
 
@@ -727,1401 +769,246 @@ write.csv(rand_table_latam, "Data/Processed/Output_calibration_and_reconstructio
 ```{r}
 write.csv(
   rand_table_all,
-  "Data/Processed/Output_calibration_and_reconstruction/Cross_validation/random_t_test_all_regions_bin3.5latam_and_5europe.csv",
+  "Data/Potential_tree_cover/Output_calibration_and_reconstruction/random_t_test_all_regions_bin1.5latam_and_0.2europe.csv",
   row.names = FALSE)
-```
-
-
-```{r}
-selected_components <- rand_table_all |>
-  group_by(region, target) |>
-  summarise(
-    selected_n_comp = if_else(
-      any(p < 0.05, na.rm = TRUE),
-      max(n_comp[p < 0.05], na.rm = TRUE),
-      NA_integer_
-    ),
-    .groups = "drop"
-  )
-```
-
-
-```{r}
-write.csv(
-  selected_components,
-  file.path(
-    cv_path,
-    paste0(
-      "selected_components_all_regions_bin5_",
-      iteration,
-      ".csv"
-    )
-  ),
-  row.names = FALSE
-)
 ```
 
 #Despues de una seleccion manual de los componentes
 
 ```{r}
-plot_data_europe <- cv_targets_europe[["Tree_Gaussian_50_sigma3"]] |>
-  as_tibble() |>
-  transmute(
-    region = "Europe",
-    target = "Tree_Gaussian_50_sigma3",
-    component = 3L,
-    id_sample = europe_twapls_data[["Tree_Gaussian_50_sigma3"]]$ids,
-    observed = test.x,
-    predicted = comp3
-  )
-
-
-plot_data_latam <- cv_targets_latam[["Tree_Gaussian_25_sigma3"]] |>
+plot_data_latam <- cv_targets_latam[["Tree_Gaussian_50_sigma2"]] |>
   as_tibble() |>
   transmute(
     region = "LATAM",
-    target = "Tree_Gaussian_25_sigma3",
-    component = 2L,
-    id_sample = latam_twapls_data[["Tree_Gaussian_25_sigma3"]]$ids,
+    target = "Tree_Gaussian_50_sigma2",
+    component = 4L,
+    id_sample = latam_twapls_data[["Tree_Gaussian_50_sigma2"]]$ids,
     observed = test.x,
-    predicted = comp2
-  )
-
-plot_data_final <- bind_rows(
-  plot_data_europe,
-  plot_data_latam
-)
-
-glimpse(plot_data_final)
-
-plot_data_final |>
-  count(region)
-```
-
-
-
-
-
-
-##################################################
-#####################################
-#########################
-##################
-```{r}
-#=========== LATAM ========
-taxa_cols_latam <- setdiff(names(latam_extraction), c(id_cols, target_cols_latam))
-# Crear una lista de dataframes para LATAM, cada uno con un target diferente
-latam_target_list <- list()
-for (target in target_cols_latam) {
-  # Seleccionar: identificadores + el target actual + todas las taxa
-  latam_target_list[[target]] <- latam_extraction %>%
-    select(all_of(c(id_cols, target, taxa_cols_latam)))
-}
-
-
-
-#======= EUROPE ========
-taxa_cols_europe <- setdiff(names(europe_extraction), c(id_cols, target_cols_europe))
-
-europe_target_list <- list()
-for (target in target_cols_europe) {
-  # Seleccionar: identificadores + el target actual + todas las taxa
-  europe_target_list[[target]] <- europe_extraction %>%
-    select(all_of(c(id_cols, target, taxa_cols_europe)))
-}
-
-
-
-# Calcular varianza y frecuencia
-nzv_metrics <- nearZeroVar(europe_extraction[, taxa_cols_europe], 
-                           freqCut = 95/5,  # Valor más frecuente >95%, segundo <5%
-                           uniqueCut = 10,   # Número de valores únicos
-                           saveMetrics = TRUE)
-
-# Ver cuántos taxones se van a eliminar
-cat("Taxones totales:", length(taxa_cols_europe), "\n")
-cat("Taxones a eliminar:", sum(nzv_metrics$nzv), "\n")
-
-# Eliminar taxones con varianza cercana a cero
-taxa_cols_europe <- setdiff(taxa_cols_europe, 
-                            rownames(nzv_metrics)[nzv_metrics$nzv == TRUE])
-
-cat("Taxones que se mantienen:", length(taxa_cols_europe), "\n")
-
-```
-
-
-
-
-Chunk 1: Extraer componentes para LATAM
-```{r}
-# Correct way to create the list for LATAM
-latam_twapls_data <- list()
-
-for (target in target_cols_latam) {
-  # Select columns for this target
-  df_temp <- latam_extraction %>%
-    select(all_of(c(id_cols, target, taxa_cols_latam)))
-  
-  latam_twapls_data[[target]] <- list(
-    taxa = df_temp %>% select(all_of(taxa_cols_latam)),
-    target = df_temp[[target]],
-    coords = df_temp %>% select(longitude, latitude),
-    ids = df_temp$id_sample
-  )
-}
-
-# Similarly for EUROPE
-europe_twapls_data <- list()
-for (target in target_cols_europe) {
-  df_temp <- europe_extraction %>%
-    select(all_of(c(id_cols, target, taxa_cols_europe)))
-  
-  europe_twapls_data[[target]] <- list(
-    taxa = df_temp %>% select(all_of(taxa_cols_europe)),
-    target = df_temp[[target]],
-    coords = df_temp %>% select(longitude, latitude),
-    ids = df_temp$id_sample
-  )
-}
-```
-
-
-
-
-Chunk 2: Configurar paralelización y ejecutar TWAPLS para LATAM
-
-
-```{r, warning=FALSE}
-# Set sequential processing globally
-library(future)
-plan(sequential)
-
-total_cores <- parallel::detectCores()
-# Opción 3: Usar 7 (la mitad, pero podría tener problemas)
-CPUS <- floor(total_cores / 2)  7
-
-
-
-# Ejecutar TWAPLS para LATAM (todos los targets)
-latam_results <- map2(
-  latam_twapls_data,
-  names(latam_twapls_data),
-  ~ {
-    cat("\n=== LATAM -", .y, "===\n")
-    
-    taxa <- .x$taxa
-    target <- .x$target
-    coords <- .x$coords
-    
-    # 1. Ajuste del modelo
-    fit <- TWAPLS.w2(taxa, target, nPLS = 5, 
-                     usefx = TRUE, fx_method = "pspline", bin = 0.08)
-    
-    # 2. Matriz de distancias
-    dist_mat <- get_distance(coords, cpus = CPUS)
-    
-    # 3. Pseudo‑sitios para validación cruzada
-    pseudo <- get_pseudo(dist_mat, target, cpus = CPUS)
-    
-    # 4. Validación cruzada - USANDO la sintaxis de tu código original
-    cv_res <- cv.pr.w(taxa, target, nPLS = 5,
-                      TWAPLS.w2,           # fit.fun (posicional)
-                      TWAPLS.predict.w,    # pred.fun (posicional)
-                      pseudo = pseudo,
-                      usefx = TRUE,
-                      fx_method = "pspline",
-                      bin = 0.08,
-                      cpus = CPUS,
-                      test_mode = FALSE) %>% pb()
-    
-    # 5. Test aleatorio de permutaciones
-    rand_test <- rand.t.test.w(cv_res, n.perm = 999) %>%
-      as_tibble() %>%
-      mutate(comp = row_number())
-    
-    # 6. Mejor componente
-    best_comp <- rand_test %>%
-      filter(p < 0.01) %>%
-      slice_min(RMSEP) %>%
-      pull(comp)
-    
-     # 6. Mejor componente
-    p_val <- rand_test %>%
-      filter(p < 0.01) %>%
-      slice_min(RMSEP) %>%
-      pull(p)
-    
-    if (length(best_comp) == 0) {
-      best_comp <- rand_test %>% slice_min(RMSEP) %>% pull(comp)
-      cat("  -> Ningún componente significativo, se usa el de menor RMSEP (comp", best_comp, ")\n")
-    } else {
-      cat("  -> Mejor componente:", best_comp, "\n")
-    }
-    
-    # 7. Observados vs predichos
-    obs_pred <- data.frame(
-      Observed = cv_res$test.x,
-      Predicted = cv_res[[paste0("comp", best_comp)]]
-    )
-    
-    # 8. Métricas
-    rmsep <- sqrt(mean((obs_pred$Observed - obs_pred$Predicted)^2))
-    r2 <- cor(obs_pred$Observed, obs_pred$Predicted)^2
-    
-    performance <- tibble(
-      region = "LATAM",
-      target = .y,
-      best_comp = best_comp,
-      p_val = p_val,
-      RMSEP = rmsep,
-      R2 = r2
-    )
-    
-    list(
-      target = .y,
-      region = "LATAM",
-      cv = cv_res,
-      rand_test = rand_test,
-      best_comp = best_comp,
-      obs_pred = obs_pred,
-      performance = performance
-    )
-  }
-)
-
-```
-
-
-```{r}
-saveRDS(latam_results, file = paste(my_path,"latam_tree_recons_results_",iteration,".rds", sep=""))
-```
-
-## EUROPE
-
-```{r}
-# Set sequential processing globally
-library(future)
-plan(sequential)
-
-total_cores <- parallel::detectCores()
-
-CPUS <- 8
-
-
-# ============================================================
-# MATRIZ DE DISTANCIAS DE EUROPE
-# ============================================================
-# Las coordenadas son las mismas para todos los escenarios,
-# por lo que calculamos las distancias UNA SOLA VEZ.
-
-coords_europe <- europe_twapls_data[[1]]$coords
-
-dist_mat_europe <- get_distance(
-  coords_europe,
-  cpus = CPUS
-)
-
-cat("\n=== Matriz de distancias de EUROPE calculada ===\n")
-
-
-saveRDS(
-  dist_mat_europe,
-  file = paste(
-    my_path,
-    "europe_distance_matrix_",
-    iteration,
-    ".rds",
-    sep = ""
-  )
-)
-
-
-
-dist_mat_europe <- readRDS(file = paste(
-    my_path,
-    "europe_distance_matrix_",
-    iteration,
-    ".rds",
-    sep = ""
-  ))
-```
-
-
-```{r, warning=FALSE}
-# ============================================================
-# EUROPE: UN ESCENARIO A LA VEZ
-# ============================================================
-
-for (target_name in names(europe_twapls_data)) {
-  
-  cat("\n")
-  cat("========================================\n")
-  cat("=== EUROPE -", target_name, "===\n")
-  cat("========================================\n")
-  
-  
-  # ----------------------------------------------------------
-  # Archivo donde se guardará este escenario
-  # ----------------------------------------------------------
-  
-  output_file <- paste(
-    my_path,
-    "europe_",
-    target_name,
-    "_",
-    iteration,
-    ".rds",
-    sep = ""
-  )
-  
-  
-  # ----------------------------------------------------------
-  # Si ya existe, no recalcular
-  # ----------------------------------------------------------
-  
-  if (file.exists(output_file)) {
-    
-    cat(
-      "-> Este escenario ya existe.\n",
-      "-> Se salta y continúa con el siguiente.\n"
-    )
-    
-    next
-  }
-  
-  
-  # ----------------------------------------------------------
-  # Extraer datos del escenario
-  # ----------------------------------------------------------
-  
-  data_current <- europe_twapls_data[[target_name]]
-  
-  taxa <- data_current$taxa
-  target <- data_current$target
-  coords <- data_current$coords
-  
-  
-  # ----------------------------------------------------------
-  # 1. Ajuste del modelo
-  # ----------------------------------------------------------
-  
-  cat("1. Ajustando TWAPLS...\n")
-  
-  fit <- TWAPLS.w2(
-    taxa,
-    target,
-    nPLS = 5,
-    usefx = TRUE,
-    fx_method = "pspline",
-    bin = 2.5
-  )
-  
-  
-  # ----------------------------------------------------------
-  # 2. Pseudo-sitios
-  #
-  # IMPORTANTE:
-  # Se calcula nuevamente para cada escenario
-  # porque depende de 'target'
-  # ----------------------------------------------------------
-  
-  cat("2. Calculando pseudo-sitios...\n")
-  
-  pseudo <- get_pseudo(
-    dist_mat_europe,
-    target,
-    cpus = CPUS
-  )
-  
-  
-  # ----------------------------------------------------------
-  # 3. Validación cruzada
-  # ----------------------------------------------------------
-  
-  cat("3. Ejecutando validación cruzada...\n")
-  
-  cv_res <- cv.pr.w(
-    taxa,
-    target,
-    nPLS = 5,
-    TWAPLS.w2,
-    TWAPLS.predict.w,
-    pseudo = pseudo,
-    usefx = TRUE,
-    fx_method = "pspline",
-    bin = 2.5,
-    cpus = CPUS,
-    test_mode = FALSE
-  ) %>% pb()
-  
-  
-  # ----------------------------------------------------------
-  # 4. Test aleatorio
-  # ----------------------------------------------------------
-  
-  cat("4. Ejecutando randomisation test...\n")
-  
-  rand_test <- rand.t.test.w(
-    cv_res,
-    n.perm = 999
-  ) %>%
-    as_tibble() %>%
-    mutate(comp = row_number())
-  
-  
-  # ----------------------------------------------------------
-  # 5. Mejor componente
-  # ----------------------------------------------------------
-  
-  best_comp <- rand_test %>%
-    filter(p < 0.01) %>%
-    slice_min(RMSEP) %>%
-    pull(comp)
-  
-  
-  p_val <- rand_test %>%
-    filter(p < 0.01) %>%
-    slice_min(RMSEP) %>%
-    pull(p)
-  
-  
-  if (length(best_comp) == 0) {
-    
-    best_comp <- rand_test %>%
-      slice_min(RMSEP) %>%
-      pull(comp)
-    
-    cat(
-      "  -> Ningún componente significativo,",
-      "se usa el de menor RMSEP (comp", 
-      best_comp, ")\n"
-    )
-    
-  } else {
-    
-    cat(
-      "  -> Mejor componente:",
-      best_comp,
-      "\n"
-    )
-  }
-  
-  
-  # ----------------------------------------------------------
-  # 6. Observados vs predichos
-  # ----------------------------------------------------------
-  
-  obs_pred <- data.frame(
-    Observed = cv_res$test.x,
-    Predicted = cv_res[[paste0("comp", best_comp)]]
-  )
-  
-  
-  # ----------------------------------------------------------
-  # 7. Métricas
-  # ----------------------------------------------------------
-  
-  rmsep <- sqrt(
-    mean(
-      (obs_pred$Observed - obs_pred$Predicted)^2
-    )
-  )
-  
-  r2 <- cor(
-    obs_pred$Observed,
-    obs_pred$Predicted
-  )^2
-  
-  
-  performance <- tibble(
-    region = "EUROPE",
-    target = target_name,
-    best_comp = best_comp,
-    p_val = p_val,
-    RMSEP = rmsep,
-    R2 = r2
-  )
-  
-  
-  # ----------------------------------------------------------
-  # 8. Crear resultado
-  # ----------------------------------------------------------
-  
-  result <- list(
-    target = target_name,
-    region = "EUROPE",
-    cv = cv_res,
-    rand_test = rand_test,
-    best_comp = best_comp,
-    obs_pred = obs_pred,
-    performance = performance
-  )
-  
-  
-  # ----------------------------------------------------------
-  # 9. GUARDAR INMEDIATAMENTE
-  # ----------------------------------------------------------
-  
-  saveRDS(
-    result,
-    output_file
-  )
-  
-  cat(
-    ">>> ESCENARIO GUARDADO:",
-    target_name,
-    "\n"
-  )
-  
-  cat(
-    ">>> Archivo:",
-    output_file,
-    "\n"
-  )
-}
-```
-
-
-
-```{r}
-# ============================================================
-# RECONSTRUIR EUROPE_RESULTS
-# ============================================================
-
-europe_files <- list.files(
-  path = my_path,
-  pattern = paste0(
-    "^europe_EUROPA.*_",
-    iteration,
-    "\\.rds$"
-  ),
-  full.names = TRUE
-)
-
-
-europe_results <- lapply(
-  europe_files,
-  readRDS
-)
-
-
-names(europe_results) <- sapply(
-  europe_results,
-  function(x) x$target
-)
-
-
-europe_performance <- purrr::map_dfr(
-  europe_results,
-  ~ .x$performance
-)
-
-europe_performance
-
-
-europe_rand <- purrr::map_dfr(
-  europe_results,
-  ~ .x$rand_test |> 
-    mutate(target = .x$target, .before = 1)
-)
-
-europe_rand
-```
-
-
-
-```{r}
-write.csv(europe_rand, file = "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Output_calibration_and_reconstruction/europe_rand_test_i3.csv")
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-```{r}
-saveRDS(europe_results, file = paste(my_path,"europe_tree_recons_results_",iteration,".rds", sep=""))
-```
-
-
-
-```{r}
-latam_results <- readRDS("Data/Processed/Output_calibration_and_reconstruction/latam_tree_recons_results_i3.rds")
-```
-
-
-
-
-
-
-Chunk 1: Identificar el mejor target
-```{r}
-# LATAM - identificar mejor target (menor RMSEP)
-latam_performance <- map_dfr(latam_results, ~ .x$performance)
-
-latam_random_test <- map_dfr(latam_results, ~ .x$rand_test)
-
-best_latam_target <- latam_performance %>% slice_min(RMSEP) %>% pull(target)
-
-#best_latam_rmsep <- latam_performance %>%
-  #slice_min(RMSEP) %>%
-  #pull(RMSEP)
-
-latam_performance
-
-cat("Mejor target en LATAM:", best_latam_target)
-#--------
-
-# LATAM - identificar mejor target (menor RMSEP)
-europe_performance <- map_dfr(europe_results, ~ .x$performance)
-
-best_europe_target <- europe_performance %>% slice_min(RMSEP) %>% pull(target)
-
-#best_latam_rmsep <- latam_performance %>%
-  #slice_min(RMSEP) %>%
-  #pull(RMSEP)
-
-europe_performance
-
-cat("Mejor target en EUROPE:", best_europe_target)
-```
-
-
-
-
-```{r}
-write.csv(latam_random_test, 
-          file = "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Processed/Output_calibration_and_reconstruction/latam_rand_test_i3.csv")
-```
-
-
-```{r}
-write.csv(latam_performance, "Data/Processed/Output_calibration_and_reconstruction/latam_performance_i3.csv")
-```
-
-
-```{r}
-write.csv(europe_performance, "Data/Processed/Output_calibration_and_reconstruction/europe_performance_i3.csv")
-```
-
-
-Chunk 2: Crear dataframe diagnóstico para LATAM (mejor target)
-```{r}
-# Extraer el mejor resultado de LATAM
-latam_best_result <- latam_results[[best_latam_target]]
-
-# Extraer los datos preparados originales para ese target
-latam_best_data <- latam_extraction[[best_latam_target]]
-
-
-# Verificar que tienen el mismo número de filas
-cat("Número de filas en obs_pred:", nrow(latam_best_result$obs_pred), "\n")
-cat("Número de filas en datos preparados:", nrow(latam_best_data), "\n")
-
-
-
-# Crear dataframe diagnóstico para LATAM
-latam_diagnostic <- latam_best_data %>%
-  # Unir con observed y predicted
-  bind_cols(
-    Observed = latam_best_result$obs_pred$Observed,
-    Predicted = latam_best_result$obs_pred$Predicted) %>%
-  # Calcular métricas de error
+    predicted = comp4
+  ) |>
+  left_join(select(latam_extraction, id_sample, latitude, longitude, elevation),
+            by = "id_sample")
+
+aux_metrics <- rand_table_latam |>
+  filter(target == "Tree_Gaussian_50_sigma2" & n_comp == 4) |>
   mutate(
-    Residual = Observed - Predicted,
-    Abs_Residual = abs(Residual),
-    Pct_Error = (Abs_Residual / (Observed + 0.001)) * 100,  # +0.001 para evitar división por cero
-    Squared_Error = (Observed - Predicted)^2,
-    Relative_Error = ifelse(Observed > 0, (Observed - Predicted) / Observed, NA),
-  ) %>%
-  # Agregar columna de diagnóstico de calidad
-  mutate(
-    Quality = case_when(
-      Abs_Residual < 0.10 ~ "Excellent",
-      Abs_Residual < 0.20 ~ "Good",
-      Abs_Residual < 0.30 ~ "Regular",
-      TRUE ~ "Poor"
-    )
-  ) %>%
-  # Reorganizar columnas para mejor visualización
-  select(id_sample, entity_name, latitude, longitude, elevation, hill_n2,
-         Observed, Predicted, Residual, Abs_Residual, Pct_Error, Squared_Error, Relative_Error, Quality,
-         everything())
+    R2 = round(R2, 2),
+    RMSEP = round(RMSEP, 2),
+    Compre.b1 = round(Compre.b1, 2)
+  )
 
-# Ver el resultado
-head(latam_diagnostic[, 1:15])
-```
-
-Chunk 2: Crear dataframe diagnóstico para EUROPE (mejor target)
-```{r}
-# Extraer el mejor resultado de EUROPE
-europe_best_result <- europe_results[[best_europe_target]]
-
-# Extraer los datos preparados originales para ese target
-europe_best_data <- europe_prepared[[best_europe_target]]
-
-
-# Verificar que tienen el mismo número de filas
-cat("Número de filas en obs_pred:", nrow(europe_best_result$obs_pred), "\n")
-cat("Número de filas en datos preparados:", nrow(europe_best_data), "\n")
-
-
-
-
-# Crear dataframe diagnóstico para LATAM
-europe_diagnostic <- europe_best_data %>%
-  # Unir con observed y predicted
-  bind_cols(
-    Observed = europe_best_result$obs_pred$Observed,
-    Predicted = europe_best_result$obs_pred$Predicted) %>%
-  # Calcular métricas de error
-  mutate(
-    Residual = Observed - Predicted,
-    Abs_Residual = abs(Residual),
-    Pct_Error = (Abs_Residual / (Observed + 0.001)) * 100,  # +0.001 para evitar división por cero
-    Squared_Error = (Observed - Predicted)^2,
-    Relative_Error = ifelse(Observed > 0, (Observed - Predicted) / Observed, NA),
-  ) %>%
-  # Agregar columna de diagnóstico de calidad
-  mutate(
-    Quality = case_when(
-      Abs_Residual < 0.10 ~ "Excellent",
-      Abs_Residual < 0.20 ~ "Good",
-      Abs_Residual < 0.30 ~ "Regular",
-      TRUE ~ "Poor"
-    )
-  ) %>%
-  # Reorganizar columnas para mejor visualización
-  select(id_sample, entity_name, latitude, longitude, elevation, hill_n2,
-         Observed, Predicted, Residual, Abs_Residual, Pct_Error, Squared_Error, Relative_Error, Quality,
-         everything())
-
-# Ver el resultado
-head(europe_diagnostic[, 1:15])
-```
-
-
-
-
-```{r}
-# LATAM - mejores y peores predicciones
-latam_best_sites <- latam_diagnostic %>%
-  arrange(Abs_Residual) %>%
-  select( Observed, Predicted, Abs_Residual, Quality) %>%
-  head(100)
-
-latam_worst_sites <- latam_diagnostic %>%
-  arrange(desc(Abs_Residual)) %>%
-  select(, Observed, Predicted, Abs_Residual, Quality) %>%
-  head(100)
-
-# EUROPE - mejores y peores predicciones
-europe_best_sites <- europe_diagnostic %>%
-  arrange(Abs_Residual) %>%
-  select(id_sample, entity_name, latitude, longitude, elevation, Observed, Predicted, Abs_Residual, Quality) %>%
-  head(200)
-
-europe_worst_sites <- europe_diagnostic %>%
-  arrange(desc(Abs_Residual)) %>%
-  select(id_sample, entity_name, latitude, longitude, elevation, Observed, Predicted, Abs_Residual, Quality) %>%
-  head(200)
-```
-
-
-
-
-```{r}
-p1 <- ggplot(latam_diagnostic, aes(x = Abs_Residual)) +
-  geom_histogram(bins = 30, fill = "darkgreen", alpha = 0.7) +
-  geom_vline(xintercept = median(latam_diagnostic$Abs_Residual), 
-             color = "red", linetype = "dashed", linewidth = 1) +
-  labs(title = paste("LATAM:", best_latam_target),
-       subtitle = paste("Median =", 
-                        round(median(latam_diagnostic$Abs_Residual), 4)),
-       x = "Absolute error", y = "Freq") +
-  theme_bw()
-
-p1
-
-p2 <- ggplot(europe_diagnostic, aes(x = Abs_Residual)) +
-  geom_histogram(bins = 30, fill = "darkgreen", alpha = 0.7) +
-  geom_vline(xintercept = median(europe_diagnostic$Abs_Residual), 
-             color = "red", linetype = "dashed", linewidth = 1) +
-  labs(title = paste("EUROPE:", best_europe_target),
-       subtitle = paste("Median =", 
-                        round(median(europe_diagnostic$Abs_Residual), 4)),
-       x = "Absolute error", y = "Freq") +
-  theme_bw()
-
-p2
-```
-
-
-
-```{r}
-# Calcular rangos extendidos (15% más allá de los datos)
-min_val_lat <- min(c(latam_diagnostic$Observed, latam_diagnostic$Predicted), na.rm = TRUE)
-max_val_lat <- max(c(latam_diagnostic$Observed, latam_diagnostic$Predicted), na.rm = TRUE)
-range_ext_lat <- (max_val_lat - min_val_lat) * 0.05
-plot_min_lat <- min_val_lat - range_ext_lat
-plot_max_lat <- max_val_lat + range_ext_lat
+  # Texto para las métricas
+ metrics_text <- paste0(paste0("R² = ", aux_metrics$R2, "\n"),
+                         paste0("RMSEP = ", aux_metrics$RMSEP, "\n"),
+                         paste0("b1 = ", aux_metrics$Compre.b1))
   
-  
-p3 <- ggplot() +
-  geom_point(data = latam_diagnostic, aes(x = Observed, y = Predicted, color = Quality), alpha = 0.6, size = 2) +
-   geom_point(data = latam_worst_sites, aes(x = Observed, y = Predicted),shape=8, size = 0.4, colour="gray20") +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
-  geom_smooth(
-  data = latam_diagnostic,
-  aes(x = Observed, y = Predicted),
-  method = "lm",
-  se = FALSE,
-  color = "firebrick3",
-  linewidth = 0.8
-) +
-
-  coord_fixed(ratio = 1, xlim = c(plot_min_lat, plot_max_lat), ylim = c(plot_min_lat, plot_max_lat)) +
-  labs(title = paste("LATAM:", best_latam_target)) +
-  theme_bw()
-
-p3
-
-
-
-#########
-
 
 
 # Calcular rangos extendidos (15% más allá de los datos)
-min_val_eur <- min(c(europe_diagnostic$Observed, europe_diagnostic$Predicted), na.rm = TRUE)
-max_val_eur <- max(c(europe_diagnostic$Observed, europe_diagnostic$Predicted), na.rm = TRUE)
-range_ext_eur <- (max_val_eur - min_val_eur) * 0.05
-plot_min_eur <- min_val_eur - range_ext_eur
-plot_max_eur <- max_val_eur + range_ext_eur
+min_val <- min(c(plot_data_europe$observed, plot_data_europe$predicted), na.rm = TRUE)
+max_val <- max(c(plot_data_europe$observed, plot_data_europe$predicted), na.rm = TRUE)
+range_ext <- (max_val - min_val) * 0.3
+plot_min <- min_val - range_ext
+plot_max <- max_val + range_ext
   
-  
-p4 <- ggplot() +
-  geom_point(data = europe_diagnostic, aes(x = Observed, y = Predicted, color = Quality), alpha = 0.6, size = 2) +
-   geom_point(data = europe_worst_sites, aes(x = Observed, y = Predicted),shape=8, size = 0.4, colour="gray20") +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
-  geom_smooth(
-  data = europe_diagnostic,
-  aes(x = Observed, y = Predicted),
-  method = "lm",
-  se = FALSE,
-  color = "firebrick3",
-  linewidth = 0.8
-) +
-
-  coord_fixed(ratio = 1, xlim = c(plot_min_eur, plot_max_eur), ylim = c(plot_min_eur, plot_max_eur)) +
-  labs(title = paste("EUROPE:", best_europe_target)) +
-  theme_bw()
-
-p4
 
 
-```
+plot_latam<- ggplot(plot_data_latam, aes(x = observed, y = predicted)) +
+    geom_point(alpha = 0.5, size = 0.6) +
+    geom_segment(x =  plot_min, y = plot_min, xend = plot_max, yend = plot_max, linetype = "dashed", color = "gray40") +
+    geom_smooth(method = "lm", se = FALSE, color = "firebrick3", linewidth = 0.8) +
+    coord_fixed(ratio = 1, xlim = c(plot_min, plot_max), ylim = c(plot_min, plot_max)) +
+    labs(x = "Potential Tree cover (%)", y = expression(italic(fx) ~ "TWA-PLS2  tree cover (%)"), subtitle = "LATAM") +
+    theme_bw() +
+    annotate("text", 
+             x = plot_min + 0.03*(plot_max - plot_min), 
+             y = plot_max - 0.03*(plot_max - plot_min), 
+             label = metrics_text,
+             hjust = 0, vjust = 1,
+             size = 2.6, family = "sans")
 
-
-
-```{r}
-lims <- range(c(latam_diagnostic$Observed,
-                latam_diagnostic$Predicted),
-              na.rm = TRUE)
-breaks <- pretty(lims, n = 5)
-
-p5 <- ggplot() +
-  geom_sf(data = land_polyg_latam) +
-  geom_point(data = latam_diagnostic,
-             aes(x = longitude, y = latitude, colour = Observed)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "ag_Sunset", rev = TRUE),
-    limits = lims,
-    breaks = breaks
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(x = NULL, y = NULL) +
-  theme_bw()
-p5
-
-p6 <- ggplot() +
-  geom_sf(data = land_polyg_latam) +
-  geom_point(data = latam_diagnostic,
-             aes(x = longitude, y = latitude, colour = Predicted)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "ag_Sunset", rev = TRUE),
-    limits = lims,
-    breaks = breaks
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(x = NULL, y = NULL) +
-  theme_bw()
-p6
+plot_latam
 ```
 
 
 ```{r}
-# Modificar los plots (sin título individual)
-p5 <- p5 + 
-  labs(colour = "Tree fract") +
-  theme(legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5),
-        legend.title = element_text(angle = 0, hjust = 0.5, vjust = 0.8))
-
-p6 <- p6 + 
-  labs(colour = "Tree fract") +
-  theme(legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5),
-        legend.title = element_text(angle = 0, hjust = 0.5, vjust = 0.8))
-
-# Crear el arreglo
-fig <- ggarrange(p5, p6, 
-          ncol = 2, 
-          common.legend = TRUE,
-          legend = "bottom",
-          labels = c("A) Observed", "B) Predicted"),
-          font.label = list(size = 12, face = "bold", color = "black"),
-          hjust = -0.2,
-          vjust = 0.6)
-
-# Añadir título común
-annotate_figure(fig,
-                top = text_grob(paste("LATAM:", best_latam_target), 
-                               face = "bold", 
-                               size = 12))
-```
-
-
-
-
-Observed vs predicted for Europe
-
-```{r}
-lims <- range(c(europe_diagnostic$Observed,
-                europe_diagnostic$Predicted),
-              na.rm = TRUE)
-breaks <- pretty(lims, n = 5)
-
-p7 <- ggplot() +
-  geom_sf(data = land_polyg_eur) +
-  geom_point(data = europe_diagnostic,
-             aes(x = longitude, y = latitude, colour = Observed)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "ag_Sunset", rev = TRUE),
-    limits = lims,
-    breaks = breaks
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(x = NULL, y = NULL) +
-  theme_bw()
-p7
-
-p8 <- ggplot() +
-  geom_sf(data = land_polyg_eur) +
-  geom_point(data = europe_diagnostic,
-             aes(x = longitude, y = latitude, colour = Predicted)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "ag_Sunset", rev = TRUE),
-    limits = lims,
-    breaks = breaks
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(x = NULL, y = NULL) +
-  theme_bw()
-p8
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/Potential tree cover/performance_bin1.5.JPG", plot = plot_latam,
+       width = 4, height = 4, units = "in", dpi = 300)
 ```
 
 
 ```{r}
-# Modificar los plots (sin título individual)
-p7 <- p7 + 
-  labs(colour = "Tree fract") +
-  theme(legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5),
-        legend.title = element_text(angle = 0, hjust = 0.5, vjust = 0.8))
-
-p8 <- p8 + 
-  labs(colour = "Tree fract") +
-  theme(legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5),
-        legend.title = element_text(angle = 0, hjust = 0.5, vjust = 0.8))
-
-# Crear el arreglo
-fig <- ggarrange(p7, p8, 
-          ncol = 2, 
-          common.legend = TRUE,
-          legend = "bottom",
-          labels = c("A) Observed", "B) Predicted"),
-          font.label = list(size = 12, face = "bold", color = "black"),
-          hjust = -0.2,
-          vjust = 0.6)
-
-# Añadir título común
-annotate_figure(fig,
-                top = text_grob(paste("EUROPE:", best_latam_target), 
-                               face = "bold", 
-                               size = 12))
-```
+plot_data_europe <- cv_targets_europe[["Tree_Gaussian_50_sigma2"]] |>
+  as_tibble() |>
+  transmute(region = "Europe",
+    target = "Tree_Gaussian_50_sigma2",
+    component = 2L,
+    id_sample = europe_twapls_data[["Tree_Gaussian_50_sigma2"]]$ids,
+    observed = test.x,
+    predicted = comp2) |>
+  left_join(select(europe_extraction, id_sample, latitude, longitude, elevation),
+            by = "id_sample")
 
 
 
-
-
-
-
-
-Absolute residual an squared error for LATAM
-
-```{r}
-# 1. Calcular límites comunes para Squared_Error y Abs_Residual
-lims_residuals <- range(c(latam_diagnostic$Squared_Error,
-                          latam_diagnostic$Abs_Residual),
-                        na.rm = TRUE)
-breaks_residuals <- pretty(lims_residuals, n = 5)
-
-# 2. Re-crear los plots con escala común y sin títulos/subtítulos
-p9 <- ggplot() +
-  geom_sf(data = land_polyg_latam) +
-  geom_point(data = latam_diagnostic,
-             aes(x = longitude, y = latitude, colour = Squared_Error)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "Batlow", rev = TRUE),
-    limits = lims_residuals,      # <-- Escala común
-    breaks = breaks_residuals     # <-- Cortes comunes
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(x = NULL, y = NULL, colour = "Residuals") +  # Título de leyenda común
-  ggtitle("Squared Error") +  # Título individual
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-        legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5))
-
-p10 <- ggplot() +
-  geom_sf(data = land_polyg_latam) +
-  geom_point(data = latam_diagnostic,
-             aes(x = longitude, y = latitude, colour = Abs_Residual)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "Batlow", rev = TRUE),
-    limits = lims_residuals,      # <-- Escala común
-    breaks = breaks_residuals     # <-- Cortes comunes
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(x = NULL, y = NULL, colour = "Residuals") +  # Título de leyenda común
-  ggtitle("Absolute Residual") +  # Título individual
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-        legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5))
-
-# 3. Juntar con ggarrange
-library(ggpubr)
-
-fig_residuals <- ggarrange(p9, p10, 
-                           ncol = 2, 
-                           common.legend = TRUE,
-                           legend = "bottom",
-                           labels = NULL)  # Sin labels porque ya tienen títulos
-
-# 4. Añadir título común (opcional)
-annotate_figure(fig_residuals,
-                top = text_grob(paste("LATAM:", best_latam_target), 
-                               face = "bold", 
-                               size = 16))
-```
-
-
-
-
-
-Absolute residual an squared error for EUROPE
-
-```{r}
-# 1. Calcular límites comunes para Squared_Error y Abs_Residual
-lims_residuals <- range(c(europe_diagnostic$Squared_Error,
-                          europe_diagnostic$Abs_Residual),
-                        na.rm = TRUE)
-breaks_residuals <- pretty(lims_residuals, n = 5)
-
-# 2. Re-crear los plots con escala común y sin títulos/subtítulos
-p9 <- ggplot() +
-  geom_sf(data = land_polyg_eur) +
-  geom_point(data = europe_diagnostic,
-             aes(x = longitude, y = latitude, colour = Squared_Error)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "Batlow", rev = TRUE),
-    limits = lims_residuals,      # <-- Escala común
-    breaks = breaks_residuals     # <-- Cortes comunes
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(x = NULL, y = NULL, colour = "Residuals") +  # Título de leyenda común
-  ggtitle("Squared Error") +  # Título individual
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-        legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5))
-
-p10 <- ggplot() +
-  geom_sf(data = land_polyg_eur) +
-  geom_point(data = europe_diagnostic,
-             aes(x = longitude, y = latitude, colour = Abs_Residual)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "Batlow", rev = TRUE),
-    limits = lims_residuals,      # <-- Escala común
-    breaks = breaks_residuals     # <-- Cortes comunes
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(x = NULL, y = NULL, colour = "Residuals") +  # Título de leyenda común
-  ggtitle("Absolute Residual") +  # Título individual
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-        legend.text = element_text(angle = 90, hjust = 0.5, vjust = 0.5))
-
-# 3. Juntar con ggarrange
-library(ggpubr)
-
-fig_residuals <- ggarrange(p9, p10, 
-                           ncol = 2, 
-                           common.legend = TRUE,
-                           legend = "bottom",
-                           labels = NULL)  # Sin labels porque ya tienen títulos
-
-# 4. Añadir título común (opcional)
-annotate_figure(fig_residuals,
-                top = text_grob(paste("EUROPE:", best_latam_target), 
-                               face = "bold", 
-                               size = 16))
-```
-
-
-```{r}
-library(patchwork)
-
-# Escala para LATAM
-lims_latam <- range(latam_diagnostic$Abs_Residual, na.rm = TRUE)
-breaks_latam <- pretty(lims_latam, n = 5)
-
-p11 <- ggplot() +
-  geom_sf(data = land_polyg_latam) +
-  geom_point(data = latam_diagnostic,
-             aes(longitude, latitude, colour = Abs_Residual)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "Batlow", rev = TRUE),
-    limits = lims_latam,
-    breaks = breaks_latam,
-    name = "Absolute\nResidual"
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(
-    title = paste("LATAM", best_latam_target),
-    x = NULL,
-    y = NULL
-  ) +
-  theme_bw() +
-  theme(
-    plot.title = element_text(face = "bold", hjust = 0.5)
+aux_metrics <- rand_table_europe |>
+  filter(target == "Tree_Gaussian_50_sigma2" & n_comp == 2) |>
+  mutate(
+    R2 = round(R2, 2),
+    RMSEP = round(RMSEP, 2),
+    Compre.b1 = round(Compre.b1, 2)
   )
 
-# Escala para EUROPE
-lims_europe <- range(europe_diagnostic$Abs_Residual, na.rm = TRUE)
-breaks_europe <- pretty(lims_europe, n = 5)
+  # Texto para las métricas
+ metrics_text <- paste0(paste0("R² = ", aux_metrics$R2, "\n"),
+                         paste0("RMSEP = ", aux_metrics$RMSEP, "\n"),
+                         paste0("b1 = ", aux_metrics$Compre.b1))
+  
 
-p12 <- ggplot() +
-  geom_sf(data = land_polyg_eur) +
-  geom_point(data = europe_diagnostic,
-             aes(longitude, latitude, colour = Abs_Residual)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "Batlow", rev = TRUE),
-    limits = lims_europe,
-    breaks = breaks_europe,
-    name = "Absolute\nResidual"
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(
-    title = paste("EUROPE", best_europe_target),
-    x = NULL,
-    y = NULL
-  ) +
-  theme_bw() +
-  theme(
-    plot.title = element_text(face = "bold", hjust = 0.5)
+
+# Calcular rangos extendidos (15% más allá de los datos)
+min_val <- min(c(plot_data_europe$observed, plot_data_europe$predicted), na.rm = TRUE)
+max_val <- max(c(plot_data_europe$observed, plot_data_europe$predicted), na.rm = TRUE)
+range_ext <- (max_val - min_val) * 0.08
+plot_min <- min_val - range_ext
+plot_max <- max_val + range_ext
+  
+
+
+plot_europe <- ggplot(plot_data_europe, aes(x = observed, y = predicted)) +
+    geom_point(alpha = 0.3, size = 0.6) +
+    geom_segment(x =  plot_min, y = plot_min, xend = plot_max, yend = plot_max, linetype = "dashed", color = "gray40") +
+    geom_smooth(method = "lm", se = FALSE, color = "firebrick3", linewidth = 0.8) +
+    coord_fixed(ratio = 1, xlim = c(plot_min, plot_max), ylim = c(plot_min, plot_max)) +
+    labs(x = "Potential Tree cover (%)", y = expression(italic(fx) ~ "TWA-PLS2  tree cover (%)"), subtitle = "EUROPE") +
+    theme_bw() +
+    annotate("text", 
+             x = plot_min + 0.03*(plot_max - plot_min), 
+             y = plot_max - 0.03*(plot_max - plot_min), 
+             label = metrics_text,
+             hjust = 0, vjust = 1,
+             size = 2.6, family = "sans")
+  
+plot_europe
+```
+
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/Potential tree cover/performance_bin0.2.JPG", plot = plot_europe,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+
+```{r}
+plot_diagnostic <- plot_data_final |>
+  filter(region == "Europe") |>
+  mutate(
+    residual = predicted - observed,
+    observed_class = cut(
+      observed,
+      breaks = c(-Inf, 20, 40, 60, 80, Inf),
+      labels = c(
+        "0–20",
+        "20–40",
+        "40–60",
+        "60–80",
+        "80–100"
+      )
+    )
+  ) |>
+  group_by(observed_class) |>
+  summarise(
+    n = n(),
+    mean_observed = mean(observed),
+    mean_predicted = mean(predicted),
+    mean_residual = mean(residual),
+    RMSEP = sqrt(mean(residual^2)),
+    .groups = "drop"
   )
 
-# Combinar manteniendo leyendas separadas
-combined_abs <- p11 + p12 +
-  plot_layout(ncol = 2, guides = "keep")
-
-combined_abs
+plot_diagnostic
 ```
 
 
-
-
-
 ```{r}
-# 1. Calcular límites comunes para elevation (de ambos datasets)
-lims_elev <- range(c(latam_worst_sites$elevation,
-                     latam_best_sites$elevation),
-                   na.rm = TRUE)
-breaks_elev <- pretty(lims_elev, n = 5)
-
-# 2. Re-crear los plots con escala correcta
-p13 <- ggplot() +
-  geom_sf(data = land_polyg_latam) +
-  geom_point(data = latam_worst_sites, 
-             aes(x = longitude, y = latitude, colour = Abs_Residual)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "Hawaii", rev = F)#,
-    #limits = lims_elev,      # <-- Límites de elevación
-   # breaks = breaks_elev     # <-- Cortes de elevación
-  ) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(x = NULL, y = NULL, colour = "Elevation") +  # Título de leyenda
-  ggtitle("Worst 100 sites") +  # Título identificador
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+plot_data_europe_map <- plot_data_europe |> pivot_longer(cols = c(observed, predicted), names_to = "type", values_to = "value")
 
 
-
-
-# 1. Calcular límites comunes para elevation (de ambos datasets)
-lims_elev <- range(c(europe_worst_sites$elevation,
-                     europe_best_sites$elevation),
-                   na.rm = TRUE)
-breaks_elev <- pretty(lims_elev, n = 5)
-
-# 2. Re-crear los plots con escala correcta
-p14 <- ggplot() +
+plot_europe_map <- ggplot() +
   geom_sf(data = land_polyg_eur) +
-  geom_point(data = europe_worst_sites, 
-             aes(x = longitude, y = latitude, colour = Abs_Residual)) +
-  scale_color_gradientn(
-    colours = hcl.colors(11, "Hawaii", rev = F)#,
-   # limits = lims_elev,      # <-- Límites de elevación
-   # breaks = breaks_elev     # <-- Cortes de elevación
-  ) +
+  geom_point(data = plot_data_europe_map, aes(x=longitude, y=latitude, colour = value), size=0.6) +
+  facet_wrap(~type) +
+  rcartocolor::scale_colour_carto_c(palette = "Temps",direction = -1) +
   scale_x_continuous(expand = c(0,0)) +
   scale_y_continuous(expand = c(0,0)) +
-  labs(x = NULL, y = NULL, colour = "Elevation") +  # Título de leyenda
-  ggtitle("Worst 200 sites") +  # Título identificador
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+  labs(x=NULL, y=NULL, color = "tree\ncover\n(%)") +
+  theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.28,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=7.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 7.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.05,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.54,0.25))
 
-
-# 3. Verificar los plots individualmente
-p13
-p14
+plot_europe_map
 ```
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/Potential tree cover/performance_map_bin0.2.JPG", plot = plot_europe_map,
+       width = 8, height = 4, units = "in", dpi = 300)
+```
+
+
+
 
 
 ```{r}
-library(ggpubr)
+plot_data_latam_map <- plot_data_latam |> pivot_longer(cols = c(observed, predicted), names_to = "type", values_to = "value")
 
-# Juntar con leyenda común
-fig_sites <- ggarrange(p4, p5, 
-                       ncol = 2, 
-                       common.legend = TRUE,
-                       legend = "bottom",
-                       labels = NULL)  # Sin labels porque tienen títulos
 
-# Añadir título común
-annotate_figure(fig_sites,
-                top = text_grob("Elevation at Best and Worst Sites", 
-                               face = "bold", 
-                               size = 16))
+plot_latam_map <- ggplot() +
+  geom_sf(data = land_polyg_latam) +
+  geom_point(data = plot_data_latam_map, aes(x=longitude, y=latitude, colour = value), size=0.7) +
+  facet_wrap(~type) +
+  rcartocolor::scale_colour_carto_c(palette = "Temps",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, color = "tree\ncover\n(%)") +
+  theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.28,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=7.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 7.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.05,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.54,0.25))
+
+plot_latam_map
 ```
-
-
-
 
 ```{r}
-# Resumen estadístico de los errores
-cat("\n=== RESUMEN DIAGNÓSTICO LATAM (", best_latam_target, ") ===\n")
-latam_diagnostic %>%
-  summarise(
-    n = n(),
-    Mean_Observed = mean(Observed),
-    Mean_Predicted = mean(Predicted),
-    Mean_Residual = mean(Residual),
-    Mean_Abs_Residual = mean(Abs_Residual),
-    Median_Abs_Residual = median(Abs_Residual),
-    RMSE = sqrt(mean(Squared_Error)),
-    Max_Abs_Residual = max(Abs_Residual),
-    Pct_Excelente = mean(Quality == "Excelente") * 100,
-    Pct_Bueno = mean(Quality == "Bueno") * 100,
-    Pct_Regular = mean(Quality == "Regular") * 100,
-    Pct_Pobre = mean(Quality == "Pobre") * 100
-  ) %>%
-  print()
-
-cat("\n=== RESUMEN DIAGNÓSTICO EUROPE (", best_europe_target, ") ===\n")
-europe_diagnostic %>%
-  summarise(
-    n = n(),
-    Mean_Observed = mean(Observed),
-    Mean_Predicted = mean(Predicted),
-    Mean_Residual = mean(Residual),
-    Mean_Abs_Residual = mean(Abs_Residual),
-    Median_Abs_Residual = median(Abs_Residual),
-    RMSE = sqrt(mean(Squared_Error)),
-    Max_Abs_Residual = max(Abs_Residual),
-    Pct_Excelente = mean(Quality == "Excelente") * 100,
-    Pct_Bueno = mean(Quality == "Bueno") * 100,
-    Pct_Regular = mean(Quality == "Regular") * 100,
-    Pct_Pobre = mean(Quality == "Pobre") * 100
-  ) %>%
-  print()
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/Potential tree cover/performance_map_bin0.2.JPG", plot = plot_latam_map,
+       width = 8, height = 4, units = "in", dpi = 300)
 ```
-
-
-
-
-
-
-
-
-
-#########
-#########
-#########
-
-
-Chunk: Graficar observado vs predicho para todos los targets (LATAM)
-```{r}
-# Función para crear gráficos de todos los targets de LATAM
-walk2(
-  latam_results,
-  names(latam_results),
-  ~ {
-    p <- ggplot(.x$obs_pred, aes(x = Observed, y = Predicted)) +
-      geom_point(alpha = 0.5, size = 1.5, color = "dodgerblue2") +
-      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
-      geom_smooth(method = "lm", se = FALSE, color = "firebrick2", linewidth = 0.7) +
-      coord_fixed() +
-      labs(title = paste("LATAM -", .y),
-           subtitle = paste("RMSEP =", round(.x$performance$RMSEP, 4),
-                            " | R² =", round(.x$performance$R2, 4),
-                            " | Component:", .x$best_comp)) +
-      theme_bw()
-    
-    print(p)
-  }
-)
-```
-
-
 
 
 
