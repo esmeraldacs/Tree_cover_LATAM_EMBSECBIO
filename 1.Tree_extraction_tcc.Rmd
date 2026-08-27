@@ -1,0 +1,1493 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-06-24"
+---
+
+Este es el codigo para transformar de clasesPoulter schemme
+
+```{r}
+library(terra)
+library(tidyverse)
+library(tidyterra)
+#library(stringr)
+library(sf)
+```
+
+
+Condigo para dos regiones simulataneas
+```{r}
+# Load and prepare land polygon for South America
+land_polyg_latam <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
+) |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-118, -33, -55, 32)) |>
+  sf::st_as_sf() #|>
+ # sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_latam)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_eur <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-20, 62, 29, 75)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf() #|>
+  #sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_eur)
+```
+
+```{r}
+tema_map <- theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.28,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=7.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 7.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.05,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.08,0.45))
+```
+
+
+LATAM
+```{r}
+# Load the data frames from the RDS file
+data_latam <- readRDS("Data/Input/updated_modern_dataset_climate_hill.rds") |>
+  select(-c(mapr, mi, gdd0, mat, mtco, mtwa, alpha, age_bp))
+
+data_latam
+
+#Remover taxa con valores de cero
+modern_pollen_latam <- data_latam |>
+  pivot_longer(cols = -c(id_sample:entity_type),names_to = "taxa") |>
+  filter(value > 0)
+
+#Remover taxa que ocurren en menos del 1 % de las muestas
+n_total <- n_distinct(modern_pollen_latam$id_sample)
+
+aux1 <- modern_pollen_latam |>
+  group_by(taxa) |>
+  mutate(n_samples = n_distinct(id_sample)) |>
+  ungroup() |>
+  filter(n_samples >= 0.002 * n_total) |>
+  select(-n_samples)
+
+#Funcion para manejar casos donde todos en el grupo son NAs
+mode_na <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) {
+    return(NA_character_)
+  }
+  names(sort(table(x), decreasing = TRUE))[1]
+}
+
+modern_pollen_latam <- aux1 |>
+  group_by(id_sample) |>
+  mutate(value = value / sum(value)) |>
+  ungroup() |>
+  arrange(taxa) |>
+  pivot_wider(
+    id_cols = c(id_sample:entity_type),
+    names_from = "taxa",
+    values_fill = 0
+  ) |>
+  select(-c(id_sample, entity_name)) |>
+  group_by(latitude, longitude) |>
+  summarise(
+    across(
+      where(is.numeric),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    site_type = mode_na(site_type),
+    entity_type = mode_na(entity_type),
+    .groups = "drop"
+  ) |>
+  mutate(id_sample = paste0("ID_", row_number())) |>
+  select(id_sample, everything())
+
+
+modern_pollen_latam <- modern_pollen_latam |>
+  select(id_sample:elevation, site_type, entity_type, everything()) |>
+  select(-site_type, -entity_type)
+  
+modern_pollen_latam
+```
+
+
+```{r}
+# Load the data frames from the RDS file
+data_europe <- read.csv("Data/Input/Modern_Pollen_TrIan_from_climate_recon_EMBSECBIO.csv") |>
+  select(-c(X, gdd, MI, Tmin, alpha)) |>
+  rename(latitude = Lat, 
+         longitude = Long, 
+         elevation = Elv,
+         entity_name = Entity.name,
+         hill_n2 = Hill_N2) |>
+  mutate(id_sample = row_number()) |>
+  select(id_sample, everything())
+
+
+#Remover taxa con valores de cero
+modern_pollen_europe <- data_europe |>
+  pivot_longer(cols = -c(id_sample:hill_n2),names_to = "taxa") |>
+  filter(value > 0)
+
+#Remover taxa que ocurren en menos del 1 % de las muestas
+n_total <- n_distinct(modern_pollen_europe$id_sample)
+
+aux2 <- modern_pollen_europe |>
+  group_by(taxa) |>
+  mutate(n_samples = n_distinct(id_sample)) |>
+  ungroup() |>
+  filter(n_samples >= 0.002 * n_total) |>
+  select(-n_samples)
+
+
+modern_pollen_europe <- aux2 |>
+  group_by(id_sample) |>
+  mutate(value = value / sum(value)) |>
+  ungroup() |>
+  arrange(taxa) |>
+  pivot_wider(id_cols = c(id_sample:hill_n2), 
+              names_from = "taxa", values_fill = 0) |>
+  select(-c(id_sample, entity_name)) |>
+  group_by(latitude, longitude) |>
+  summarise(across(where(is.numeric),~ mean(.x, na.rm = TRUE)),.groups = "drop") |>
+  mutate(id_sample = paste0("ID_", row_number())) |>
+  select(id_sample, everything())
+
+  
+modern_pollen_europe
+```
+
+
+
+
+
+```{r}
+saveRDS(modern_pollen_latam, "Data/Input/modern_pollen_latam.rds")
+
+saveRDS(modern_pollen_europe, "Data/Input/modern_pollen_europe.rds")
+```
+
+
+```{r}
+modern_pollen_latam <- readRDS("Data/Input/modern_pollen_latam.rds")
+
+modern_pollen_europe <- readRDS("Data/Input/modern_pollen_europe.rds") |>
+  filter(longitude <= 62 & latitude <= 75)
+```
+
+
+```{r}
+ggplot() +
+ # geom_sf(data = land_polyg_eur) +
+  geom_point(data = modern_pollen_europe, aes(x=longitude, y=latitude)) 
+```
+
+
+
+```{r}
+r_tcc <- rast("C:/Datasets_Tree_Cover/Potential_Tree_Cover_Roebroek2025/tcc_current_climate.tif")
+
+plot(r_tcc)
+```
+
+
+
+
+
+Este solo se ejecuta una vez
+```{r}
+# 2. CRS métrico (para medir distancias) y resolución común
+crs_metric <- "EPSG:6933"
+#res_target <- 250
+
+# Reproyectar a CRS metrico
+#r_tcc_metric <- project(r_tcc, crs_metric, method = "bilinear", res = res_target)
+r_tcc_metric <- project(r_tcc, crs_metric, method = "bilinear")
+
+# Comprobar
+res(r_tcc_metric)
+
+crs(r_tcc_metric)
+
+
+#Convertir poligonos a terra
+land_latam_vect <- vect(land_polyg_latam)
+land_eur_vect   <- vect(land_polyg_eur)
+
+#Después transformamos los polígonos. land_polyg_latam y land_polyg_eur están en WGS84. No hay problema: simplemente los pasamos al mismo CRS métrico:
+land_latam_metric <- project(land_latam_vect, crs_metric)
+land_eur_metric <- project(land_eur_vect, crs_metric)
+
+
+#Crop + mask
+#LATAM
+r_latam_crop <- r_tcc_metric |>
+  crop(land_latam_metric) |>
+  mask(land_latam_metric)
+
+#EUROPE
+r_europa_crop <- r_tcc_metric |>
+  crop(land_eur_metric) |>
+  mask(land_eur_metric)
+
+res(r_latam_crop)
+res(r_europa_crop)
+
+plot(r_latam_crop, main = "Tree cover - Latin America")
+plot(land_latam_metric, add = TRUE)
+
+plot(r_europa_crop, main = "Tree cover - Europe")
+plot(land_eur_metric, add = TRUE)
+
+
+```
+
+```{r}
+# 4. Guardar
+writeRaster(r_latam_crop, "Data/Potential_tree_cover/rasters/potential_tree_LATAM_EPSG6933_land.tif", overwrite = TRUE)
+
+writeRaster(r_europa_crop, "Data/Potential_tree_cover/rasters/potential_tree_EUROPA_EPSG6933_land.tif", overwrite = TRUE)
+```
+
+
+```{r}
+library(terra)
+
+# Abrir los rasters
+r_latam  <- rast("Data/Potential_tree_cover/rasters/potential_tree_LATAM_EPSG6933_land.tif")/100
+r_europa <- rast("Data/Potential_tree_cover/rasters/potential_tree_EUROPA_EPSG6933_land.tif")/100
+
+
+plot(r_latam, main = "Tree cover - Latin America")
+
+plot(r_europa, main = "Tree cover - Europe")
+```
+
+Plotting of the map
+```{r}
+# ============================================================
+# 2. Reducir resolución SOLO para plotting
+#    factor = 5 --> cada 5x5 píxeles se convierte en 1
+# ============================================================
+agg_factor <- 3
+
+r_latam_plot  <- aggregate(r_latam,  fact = agg_factor, fun = mean, na.rm = TRUE)
+r_europa_plot <- aggregate(r_europa, fact = agg_factor, fun = mean, na.rm = TRUE)
+
+r_latam_plot  <- project(r_latam_plot, "EPSG:4326")
+r_europa_plot <- project(r_europa_plot, "EPSG:4326")
+# 3. Convertir a data.frame para plotting
+
+df_latam <- as.data.frame(r_latam_plot, xy = TRUE, na.rm = TRUE)
+df_europa <- as.data.frame(r_europa_plot, xy = TRUE, na.rm = TRUE)
+
+# Renombrar la columna del raster
+names(df_latam)[3]  <- "tree_cover"
+names(df_europa)[3] <- "tree_cover"
+
+#plot(r_latam_plot, main = "Tree cover - Latin America (reduced resolution)")
+#plot(r_latam, main = "Tree cover - Latin America")
+#plot(r_europa_plot, main = "Tree cover - Europe (reduced resolution)")
+#plot(r_europa, main = "Tree cover - Europe")
+
+map_latam <- ggplot() +
+  geom_sf(data=land_polyg_latam) +
+  geom_tile(data = df_latam, aes(x=x, y=y, fill=tree_cover)) +
+  rcartocolor::scale_fill_carto_c(palette = "Temps",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, fill = "(%)", subtitle = "Potential tree cover (Roebroek et al., 2025)") +
+  tema_map
+  
+  
+map_latam  
+
+map_europe <- ggplot() +
+  geom_sf(data=land_polyg_eur) +
+  geom_tile(data = df_europa, aes(x=x, y=y, fill=tree_cover)) +
+  rcartocolor::scale_fill_carto_c(palette = "Temps",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, fill = "(%)", subtitle = "Potential tree cover (Roebroek et al., 2025)") +
+  tema_map
+  
+  
+map_europe 
+```
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/Potential tree cover/Roebroek_map_bin.JPG", plot = map_latam,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/Potential tree cover/Roebroek_map_bin.JPG", plot = map_europe,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+1. Preparar únicamente id_sample, latitud y longitud
+```{r}
+# Puntos LATAM
+pts_latam <- modern_pollen_latam |> dplyr::select(id_sample, latitude, longitude)
+# Puntos Europa
+pts_europa <- modern_pollen_europe |> dplyr::select(id_sample, latitude, longitude)
+
+nrow(pts_latam)
+nrow(pts_europa)
+```
+
+2. Trabajar en un CRS métrico
+
+Como los radios son de 25 y 50 km, no quiero calcular distancias directamente en WGS84.
+Para empezar, podemos utilizar una proyección métrica global. Una opción práctica para este análisis es EPSG:6933, que trabaja en metros y es apropiada para análisis espaciales globales.
+```{r}
+
+pts_latam_vect <- vect(pts_latam, geom = c("longitude", "latitude"), crs = "EPSG:4326")
+
+pts_europa_vect <- vect(pts_europa, geom = c("longitude", "latitude"), crs = "EPSG:4326")
+
+crs_metric <- "EPSG:6933"
+pts_latam_metric <- project(pts_latam_vect, crs_metric)
+pts_europa_metric <- project(pts_europa_vect, crs_metric)
+
+```
+
+3. Extraer los píxeles dentro de 50 km
+Aquí está una parte importante del diseño.
+Vamos a crear buffers de 50,000 m alrededor de cada punto:
+Y extraemos los píxeles del raster.
+```{r}
+buffer50_latam <- buffer(pts_latam_metric, width = 50000)
+buffer50_europa <- buffer(pts_europa_metric, width = 50000)
+
+
+extract50_latam <- terra::extract(r_latam, buffer50_latam, cells = TRUE, xy = TRUE)
+extract50_europa <- terra::extract(r_europa, buffer50_europa, cells = TRUE, xy = TRUE)
+
+```
+
+
+4. Añadir las coordenadas de cada punto
+Necesitamos saber la distancia entre el centro de cada píxel y el punto correspondiente.
+```{r}
+#Para LATAM:
+coords_latam <- crds(pts_latam_metric)
+
+coords_latam <- data.frame(point_id = seq_len(nrow(pts_latam_metric)),
+                           point_x = coords_latam[, 1],
+                           point_y = coords_latam[, 2])
+
+#Para Europa
+coords_europa <- crds(pts_europa_metric)
+
+coords_europa <- data.frame(point_id = seq_len(nrow(pts_europa_metric)),
+                            point_x = coords_europa[, 1],
+                            point_y = coords_europa[, 2])
+
+
+#Ahora podemos añadir esas coordenadas a las extracciones:
+extract50_latam <- extract50_latam |>
+  left_join(coords_latam, by = c("ID" = "point_id"))
+
+extract50_europa <- extract50_europa |>
+  left_join(coords_europa, by = c("ID" = "point_id"))
+```
+
+
+5. Calcular distancia de cada píxel al punto
+Como estamos en metros:
+```{r}
+extract50_latam <- extract50_latam |> mutate(distance_m = sqrt((x - point_x)^2 +
+                                                                 (y - point_y)^2))
+
+extract50_europa <- extract50_europa |> mutate(distance_m = sqrt((x - point_x)^2 +
+                                                                   (y - point_y)^2))
+```
+
+
+
+
+
+```{r}
+#Test
+#Como los buffers son de 50 km, los máximos deberían quedar aproximadamente en 50,000 m o muy cerca. Puede haber una pequeña diferencia por el tamaño de los píxeles y porque usamos las coordenadas del centro de cada celda.
+summary(extract50_latam$distance_m)
+summary(extract50_europa$distance_m)
+
+max(extract50_latam$distance_m, na.rm = TRUE)
+max(extract50_europa$distance_m, na.rm = TRUE)
+
+#También puedes comprobar cuántos píxeles se están usando por punto:
+extract50_latam |>
+  count(ID) |>
+  summary()
+
+extract50_europa |>
+  count(ID) |>
+  summary()
+```
+
+
+```{r}
+saveRDS(extract50_latam, "Data/Potential_tree_cover/extraction_points/potential_treecover_extract_LATAM_50km_EPSG6933_1kmres.rds")
+
+saveRDS(extract50_europa, "Data/Potential_tree_cover/extraction_points/potential_treecover_extract_EUROPA_50km_EPSG6933_1kmres.rds")
+```
+
+
+```{r}
+extract50_latam <- readRDS("Data/Potential_tree_cover/extraction_points/potential_treecover_extract_LATAM_50km_EPSG6933_1kmres.rds")
+
+extract50_europa <- readRDS("Data/Potential_tree_cover/extraction_points/potential_treecover_extract_EUROPA_50km_EPSG6933_1kmres.rds")
+```
+
+
+```{r}
+glimpse(extract50_latam)
+```
+
+
+
+```{r}
+extract50_europa <- extract50_europa |> rename(tree_cover =`Tree cover carrying capacity`)
+
+extract50_latam <- extract50_latam |> rename(tree_cover =`Tree cover carrying capacity`)
+```
+
+Ahora viene la parte de calcular los seis escenarios gaussianos. Como extract50_* son enormes, yo lo haría por región y por radio, evitando crear tres columnas permanentes de pesos.
+Empezaría con LATAM y, cuando comprobemos que funciona, hacemos exactamente lo mismo para Europa.
+Primero define los sigmas:
+```{r}
+# Sigma para radio de 50 km
+sigma50_100 <- 50000 / 100   # 500 m
+sigma50_10  <- 50000 / 10    # 5,000 m
+sigma50_3   <- 50000 / 3     # 16,666.67 m
+sigma50_2   <- 50000 / 2     # 25,000 m
+
+# Sigma para radio de 25 km
+sigma25_100 <- 25000 / 100   # 250 m
+sigma25_10  <- 25000 / 10    # 2,500 m
+sigma25_3   <- 25000 / 3     # 8,333.33 m
+sigma25_2   <- 25000 / 2     # 12,500 m
+```
+
+
+1. LATAM — escenarios de 50 km
+Aquí usamos todos los píxeles de extract50_latam. La regla de NA será exactamente la que acordamos: si más de la mitad de los píxeles del buffer son NA, el resultado será NA.
+
+GAUSSIAN-WEIGHTED TREE COVER WITHIN A 50-km RADIUS — LATIN AMERICA
+
+Objective:
+
+For each modern pollen sample (ID), calculate the mean tree cover within a circular 50-km radius, weighting each raster pixel according to its distance from the sampling point using a Gaussian function.
+
+Pixels located close to the sampling point therefore contribute more strongly to the estimated tree-cover value than pixels located farther away.
+
+Three Gaussian weighting scenarios are calculated using the SAME 50-km extraction radius but different sigma (σ) values:
+
+* sigma = radius / 100 = 500 m
+* sigma = radius / 10 = 5,000 m
+* sigma = radius / 3 = 16,666.67 m
+
+A smaller sigma produces a much stronger concentration of weight around the sampling point, whereas a larger sigma allows more distant pixels to contribute substantially to the final estimate.
+
+Gaussian weighting function:
+
+w = exp( - d² / (2 × σ²) )
+
+where:
+
+w = weight assigned to a raster pixel
+d = distance between the centre of the raster pixel and the pollen sample
+σ = standard deviation controlling the spatial decay of the Gaussian kernel
+
+The Gaussian-weighted tree-cover estimate is:
+
+TreeCover_weighted = Σ(tree_cover_i × w_i) / Σ(w_i)
+
+Importantly, the denominator contains ONLY the weights associated with non-NA tree-cover pixels. Therefore, missing raster cells do not contribute either to the numerator or denominator.
+
+Missing-data criterion:
+
+Before calculating the Gaussian-weighted mean, the proportion of NA pixels within the complete 50-km buffer is evaluated.
+
+If MORE THAN 50% of the raster pixels within the buffer are NA, the final tree-cover estimate is assigned NA.
+
+For example:
+
+100 pixels, 51 NA → result = NA
+100 pixels, 50 NA → weighted mean calculated from the 50 valid pixels
+100 pixels, 20 NA → weighted mean calculated from the 80 valid pixels
+
+This criterion prevents tree-cover estimates from being calculated for sampling locations where the raster provides insufficient spatial coverage.
+
+
+
+
+
+```{r}
+results50_latam <- extract50_latam |>
+  group_by(ID) |>
+  summarise(
+
+    # ========================================================================
+    # SCENARIO 1
+    # Radius = 50 km
+    # sigma = 50 km / 100 = 500 m
+    #
+    # Missing-data rule:
+    # Evaluate data availability ONLY within one sigma (500 m).
+    # If more than 50% of the pixels located within 500 m are NA,
+    # the final estimate is assigned NA.
+    #
+    # IMPORTANT:
+    # The NA criterion is evaluated within sigma, but the Gaussian weighted
+    # mean itself still uses all available pixels within the complete
+    # 50-km extraction radius.
+    # ========================================================================
+
+    n_sigma100 = sum(distance_m <= sigma50_100),
+
+    n_na_sigma100 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_100
+    ),
+
+    Tree_Gaussian_50_sigma100 = if_else(
+
+      n_na_sigma100 > n_sigma100 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma50_100^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_100^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
+    # SCENARIO 2
+    # Radius = 50 km
+    # sigma = 50 km / 10 = 5,000 m
+    #
+    # The NA criterion is evaluated using only pixels within 5 km.
+    # ========================================================================
+
+    n_sigma10 = sum(distance_m <= sigma50_10),
+
+    n_na_sigma10 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_10
+    ),
+
+    Tree_Gaussian_50_sigma10 = if_else(
+
+      n_na_sigma10 > n_sigma10 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma50_10^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_10^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
+    # SCENARIO 3
+    # Radius = 50 km
+    # sigma = 50 km / 3 = 16,666.67 m
+    #
+    # The NA criterion is evaluated using only pixels within 16.67 km.
+    # ========================================================================
+
+    n_sigma3 = sum(distance_m <= sigma50_3),
+
+    n_na_sigma3 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_3
+    ),
+
+    Tree_Gaussian_50_sigma3 = if_else(
+
+      n_na_sigma3 > n_sigma3 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma50_3^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_3^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
+    # SCENARIO 4
+    # Radius = 50 km
+    # sigma = 50 km / 2 = 25,000 m
+    #
+    # The NA criterion is evaluated using only pixels within 25 km.
+    # ========================================================================
+
+    n_sigma2 = sum(distance_m <= sigma50_2),
+
+    n_na_sigma2 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_2
+    ),
+
+    Tree_Gaussian_50_sigma2 = if_else(
+
+      n_na_sigma2 > n_sigma2 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma50_2^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_2^2)
+          )
+        )
+    ),
+
+    .groups = "drop"
+  )
+
+```
+
+Una interpretación útil para documentar tus escenarios es recordar qué ocurre a una distancia igual a σ. En una gaussiana:
+w = e⁻¹ᐟ² ≈ 0.607
+
+Así, para el radio de 50 km:
+| Distancia | σ = 0.5 km | σ = 5 km | σ = 16.67 km |
+| --------- | ---------: | -------: | -----------: |
+| 0 km      |          1 |        1 |            1 |
+| 0.5 km    |      0.607 |    0.995 |           ~1 |
+| 5 km      |         ~0 |    0.607 |        0.956 |
+| 16.7 km   |         ~0 |    0.004 |        0.607 |
+| 50 km     |         ~0 |       ~0 |        0.011 |
+
+Esto deja muy clara la diferencia conceptual: aunque los tres escenarios usan un radio máximo de 50 km, sigma100 es prácticamente una estimación muy local, sigma10 integra principalmente unos pocos kilómetros alrededor del sitio, y sigma3 incorpora información de una porción mucho mayor del paisaje.
+
+Verificacion antes de continuar
+```{r}
+results50_latam |>
+  dplyr::select(
+    ID,
+    n_sigma100,
+    n_na_sigma100,
+    Tree_Gaussian_50_sigma100
+  ) |>
+  mutate(
+    prop_na_sigma100 = n_na_sigma100 / n_sigma100
+  ) |>
+  arrange(desc(prop_na_sigma100))
+```
+
+#Ahora seguimos con los escenarios  de 25 km
+```{r}
+extract25_latam <- extract50_latam |> filter(distance_m <= 25000)
+
+#verificacion de que el filtro quedo bien
+#Debería:
+#máximo = 25,000 m
+#mediana de distancia ≈ 17.68 km
+#media ≈ 16.67 km
+#~31,416 píxeles por punto
+#Ese número cuadra casi perfecto con el área teórica de un círculo de 25 km a 250 m de resolución:
+#250² × π × 25,000² ≈ 31,416
+
+
+#summary(extract25_latam$distance_m)
+#max(extract25_latam$distance_m,na.rm = TRUE)
+
+#extract25_latam |> count(ID) |> summary()
+```
+
+
+
+```{r}
+results25_latam <- extract25_latam |>
+  group_by(ID) |>
+  summarise(
+
+    # ========================================================================
+    # SCENARIO 1
+    # Radius = 25 km
+    # sigma = 25 km / 100 = 250 m
+    # ========================================================================
+
+    n_sigma100 = sum(distance_m <= sigma25_100),
+
+    n_na_sigma100 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_100
+    ),
+
+    Tree_Gaussian_25_sigma100 = if_else(
+
+      n_na_sigma100 > n_sigma100 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_100^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_100^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
+    # SCENARIO 2
+    # Radius = 25 km
+    # sigma = 25 km / 10 = 2,500 m
+    # ========================================================================
+
+    n_sigma10 = sum(distance_m <= sigma25_10),
+
+    n_na_sigma10 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_10
+    ),
+
+    Tree_Gaussian_25_sigma10 = if_else(
+
+      n_na_sigma10 > n_sigma10 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_10^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_10^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
+    # SCENARIO 3
+    # Radius = 25 km
+    # sigma = 25 km / 3 = 8,333.33 m
+    # ========================================================================
+
+    n_sigma3 = sum(distance_m <= sigma25_3),
+
+    n_na_sigma3 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_3
+    ),
+
+    Tree_Gaussian_25_sigma3 = if_else(
+
+      n_na_sigma3 > n_sigma3 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_3^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_3^2)
+          )
+        )
+    ),
+
+
+    # ========================================================================
+    # SCENARIO 4
+    # Radius = 25 km
+    # sigma = 25 km / 2 = 12,500 m
+    # ========================================================================
+
+    n_sigma2 = sum(distance_m <= sigma25_2),
+
+    n_na_sigma2 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_2
+    ),
+
+    Tree_Gaussian_25_sigma2 = if_else(
+
+      n_na_sigma2 > n_sigma2 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_2^2)
+          ),
+        na.rm = TRUE
+      ) /
+
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_2^2)
+          )
+        )
+    ),
+
+    .groups = "drop"
+  )
+```
+
+
+
+```{r}
+summary(results25_latam$Tree_Gaussian_25_sigma100)
+summary(results25_latam$Tree_Gaussian_25_sigma10)
+summary(results25_latam$Tree_Gaussian_25_sigma3)
+summary(results25_latam$Tree_Gaussian_25_sigma2)
+
+results25_latam |>
+  summarise(
+    n_samples = n(),
+    NA_sigma100 = sum(is.na(Tree_Gaussian_25_sigma100)),
+    NA_sigma10  = sum(is.na(Tree_Gaussian_25_sigma10)),
+    NA_sigma3   = sum(is.na(Tree_Gaussian_25_sigma3)),
+    NA_sigma2   = sum(is.na(Tree_Gaussian_25_sigma2))
+  )
+```
+
+```{r}
+tree_gaussian_latam <- results50_latam |>
+  dplyr::select(
+    ID,
+    Tree_Gaussian_50_sigma100,
+    Tree_Gaussian_50_sigma10,
+    Tree_Gaussian_50_sigma3,
+    Tree_Gaussian_50_sigma2
+  ) |>
+  left_join(
+    results25_latam |>
+      dplyr::select(
+        ID,
+        Tree_Gaussian_25_sigma100,
+        Tree_Gaussian_25_sigma10,
+        Tree_Gaussian_25_sigma3,
+        Tree_Gaussian_25_sigma2
+      ),
+    by = "ID"
+  )
+```
+
+
+```{r}
+id_lookup_latam <- pts_latam |>
+  mutate(ID = row_number()) |>
+  dplyr::select(
+    ID,
+    id_sample,
+    latitude,
+    longitude
+  )
+
+tree_gaussian_latam <- tree_gaussian_latam |>
+  left_join(
+    id_lookup_latam,
+    by = "ID"
+  ) |>
+  relocate(
+    id_sample,
+    latitude,
+    longitude,
+    .after = ID
+  )
+```
+
+
+```{r}
+ggplot(data = tree_gaussian_latam) +
+  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma100)) +
+  scale_color_viridis_c(option = "plasma")
+
+ggplot(data = tree_gaussian_latam) +
+  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma2)) +
+  scale_color_viridis_c(option = "plasma")
+```
+
+
+```{r}
+saveRDS(tree_gaussian_latam, "Data/Potential_tree_cover/extraction_points/potential_tree_gaussian_LATAM_25_50km.rds")
+```
+
+
+```{r}
+modern_pollen_latam_gaussian <- modern_pollen_latam |>
+  left_join(
+    tree_gaussian_latam |>
+      dplyr::select(
+        -ID,
+        -latitude,
+        -longitude
+      ),
+    by = "id_sample"
+  )
+```
+
+
+```{r}
+saveRDS(modern_pollen_latam_gaussian, "Data/Potential_tree_cover/extraction_points/potential_tree_gaussian_LATAM_25_50km_modern_pollen.rds")
+```
+
+
+Ahora empezamos con EUROPA
+```{r}
+# ============================================================
+# EUROPA — DEFINIR SIGMAS
+# ============================================================
+
+# Sigma para radio de 50 km
+sigma50_100 <- 50000 / 100   # 500 m
+sigma50_10  <- 50000 / 10    # 5,000 m
+sigma50_3   <- 50000 / 3     # 16,666.67 m
+sigma50_2   <- 50000 / 2     # 25,000 m
+
+# Sigma para radio de 25 km
+sigma25_100 <- 25000 / 100   # 250 m
+sigma25_10  <- 25000 / 10    # 2,500 m
+sigma25_3   <- 25000 / 3     # 8,333.33 m
+sigma25_2   <- 25000 / 2     # 12,500 m
+```
+
+
+```{r}
+# ============================================================
+# EUROPA — GAUSSIAN TREE COVER, RADIO DE 50 KM
+# ============================================================
+
+results50_europa <- extract50_europa |>
+  group_by(ID) |>
+  summarise(
+
+    # --------------------------------------------------------
+    # SCENARIO 1
+    # Radius = 50 km
+    # sigma = 500 m
+    #
+    # La cobertura NA se evalúa únicamente dentro de 1 sigma.
+    # Si más del 50% de los píxeles dentro de sigma son NA,
+    # el resultado final se asigna como NA.
+    #
+    # El promedio gaussiano, sin embargo, sigue utilizando
+    # todos los píxeles válidos dentro del radio completo
+    # de 50 km.
+    # --------------------------------------------------------
+
+    n_sigma100 = sum(distance_m <= sigma50_100),
+
+    n_na_sigma100 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_100
+    ),
+
+    Tree_Gaussian_50_sigma100 = if_else(
+      n_na_sigma100 > n_sigma100 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(-(distance_m^2) / (2 * sigma50_100^2)),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_100^2)
+          )
+        )
+    ),
+
+
+    # --------------------------------------------------------
+    # SCENARIO 2
+    # Radius = 50 km
+    # sigma = 5 km
+    # --------------------------------------------------------
+
+    n_sigma10 = sum(distance_m <= sigma50_10),
+
+    n_na_sigma10 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_10
+    ),
+
+    Tree_Gaussian_50_sigma10 = if_else(
+      n_na_sigma10 > n_sigma10 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(-(distance_m^2) / (2 * sigma50_10^2)),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_10^2)
+          )
+        )
+    ),
+
+
+    # --------------------------------------------------------
+    # SCENARIO 3
+    # Radius = 50 km
+    # sigma = 16.67 km
+    # --------------------------------------------------------
+
+    n_sigma3 = sum(distance_m <= sigma50_3),
+
+    n_na_sigma3 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_3
+    ),
+
+    Tree_Gaussian_50_sigma3 = if_else(
+      n_na_sigma3 > n_sigma3 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(-(distance_m^2) / (2 * sigma50_3^2)),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_3^2)
+          )
+        )
+    ),
+
+
+    # --------------------------------------------------------
+    # SCENARIO 4
+    # Radius = 50 km
+    # sigma = 25 km
+    # --------------------------------------------------------
+
+    n_sigma2 = sum(distance_m <= sigma50_2),
+
+    n_na_sigma2 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma50_2
+    ),
+
+    Tree_Gaussian_50_sigma2 = if_else(
+      n_na_sigma2 > n_sigma2 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(-(distance_m^2) / (2 * sigma50_2^2)),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma50_2^2)
+          )
+        )
+    ),
+
+    .groups = "drop"
+  )
+```
+
+
+Revisamos
+```{r}
+summary(results50_europa$Tree_Gaussian_50_sigma100)
+summary(results50_europa$Tree_Gaussian_50_sigma10)
+summary(results50_europa$Tree_Gaussian_50_sigma3)
+summary(results50_europa$Tree_Gaussian_50_sigma2)
+```
+
+```{r}
+# ============================================================
+# EUROPE — SELECT PIXELS WITHIN 25 KM
+# ============================================================
+
+extract25_europa <- extract50_europa |>
+  filter(distance_m <= 25000)
+```
+
+
+
+```{r}
+# ============================================================
+# EUROPE — GAUSSIAN-WEIGHTED TREE COVER WITHIN 25 KM
+# ============================================================
+#
+# Missing-data rule:
+#
+# For each Gaussian scenario, raster coverage is evaluated within
+# a distance equivalent to one sigma (σ).
+#
+# If MORE THAN 50% of the pixels located within 1σ are NA,
+# the tree-cover estimate is assigned NA.
+#
+# Otherwise, the Gaussian-weighted mean is calculated using all
+# valid tree-cover pixels within the complete 25-km radius.
+#
+# Therefore:
+#
+# sigma/100 -> coverage evaluated within    250 m
+# sigma/10  -> coverage evaluated within  2,500 m
+# sigma/3   -> coverage evaluated within  8,333 m
+# sigma/2   -> coverage evaluated within 12,500 m
+#
+# ============================================================
+
+
+results25_europa <- extract25_europa |>
+  group_by(ID) |>
+  summarise(
+
+    # ========================================================
+    # SCENARIO 1
+    # Radius = 25 km
+    # sigma = 25 km / 100 = 250 m
+    # ========================================================
+
+    n_sigma100 = sum(
+      distance_m <= sigma25_100
+    ),
+
+    n_na_sigma100 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_100
+    ),
+
+    Tree_Gaussian_25_sigma100 = if_else(
+
+      n_na_sigma100 > n_sigma100 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_100^2)
+          ),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_100^2)
+          )
+        )
+    ),
+
+
+    # ========================================================
+    # SCENARIO 2
+    # Radius = 25 km
+    # sigma = 25 km / 10 = 2,500 m
+    # ========================================================
+
+    n_sigma10 = sum(
+      distance_m <= sigma25_10
+    ),
+
+    n_na_sigma10 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_10
+    ),
+
+    Tree_Gaussian_25_sigma10 = if_else(
+
+      n_na_sigma10 > n_sigma10 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_10^2)
+          ),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_10^2)
+          )
+        )
+    ),
+
+
+    # ========================================================
+    # SCENARIO 3
+    # Radius = 25 km
+    # sigma = 25 km / 3 = 8,333.33 m
+    # ========================================================
+
+    n_sigma3 = sum(
+      distance_m <= sigma25_3
+    ),
+
+    n_na_sigma3 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_3
+    ),
+
+    Tree_Gaussian_25_sigma3 = if_else(
+
+      n_na_sigma3 > n_sigma3 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_3^2)
+          ),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_3^2)
+          )
+        )
+    ),
+
+
+    # ========================================================
+    # SCENARIO 4
+    # Radius = 25 km
+    # sigma = 25 km / 2 = 12,500 m
+    # ========================================================
+
+    n_sigma2 = sum(
+      distance_m <= sigma25_2
+    ),
+
+    n_na_sigma2 = sum(
+      is.na(tree_cover) &
+        distance_m <= sigma25_2
+    ),
+
+    Tree_Gaussian_25_sigma2 = if_else(
+
+      n_na_sigma2 > n_sigma2 / 2,
+
+      NA_real_,
+
+      sum(
+        tree_cover *
+          exp(
+            -(distance_m^2) /
+              (2 * sigma25_2^2)
+          ),
+        na.rm = TRUE
+      ) /
+        sum(
+          exp(
+            -(distance_m[!is.na(tree_cover)]^2) /
+              (2 * sigma25_2^2)
+          )
+        )
+    ),
+
+    .groups = "drop"
+  )
+```
+
+
+
+```{r}
+# ============================================================
+# UNIR RESULTADOS DE 50 KM Y 25 KM — EUROPA
+# ============================================================
+
+tree_gaussian_europa <- results50_europa |>
+  dplyr::select(
+    ID,
+    Tree_Gaussian_50_sigma100,
+    Tree_Gaussian_50_sigma10,
+    Tree_Gaussian_50_sigma3,
+    Tree_Gaussian_50_sigma2
+  ) |>
+  left_join(
+    results25_europa |>
+      dplyr::select(
+        ID,
+        Tree_Gaussian_25_sigma100,
+        Tree_Gaussian_25_sigma10,
+        Tree_Gaussian_25_sigma3,
+        Tree_Gaussian_25_sigma2
+      ),
+    by = "ID"
+  )
+```
+
+
+```{r}
+nrow(tree_gaussian_europa)
+```
+
+
+```{r}
+id_lookup_europa <- pts_europa |>
+  mutate(ID = row_number()) |>
+  dplyr::select(
+    ID,
+    id_sample,
+    latitude,
+    longitude
+  )
+
+tree_gaussian_europa <- tree_gaussian_europa |>
+  left_join(
+    id_lookup_europa,
+    by = "ID"
+  ) |>
+  relocate(
+    id_sample,
+    latitude,
+    longitude,
+    .after = ID
+  )
+```
+
+
+```{r}
+modern_pollen_europe_gaussian <- modern_pollen_europe |>
+  left_join(
+    tree_gaussian_europa |>
+      dplyr::select(
+        -ID,
+        -latitude,
+        -longitude
+      ),
+    by = "id_sample"
+  )
+```
+
+
+```{r}
+ggplot(data = tree_gaussian_europa) +
+  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma100)) +
+  scale_color_viridis_c(option = "plasma")
+
+ggplot(data = tree_gaussian_europa) +
+  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma2)) +
+  scale_color_viridis_c(option = "plasma")
+```
+
+
+```{r}
+saveRDS(
+  tree_gaussian_europa,
+  "Data/Potential_tree_cover/extraction_points/potential_tree_gaussian_EUROPA_25_50km.rds"
+)
+
+saveRDS(
+  modern_pollen_europe_gaussian,
+  "Data/Potential_tree_cover/extraction_points/potential_tree_gaussian_EUROPA_25_50km_modern_pollen.rds"
+)
+```
+
+
