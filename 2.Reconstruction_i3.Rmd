@@ -74,6 +74,43 @@ my_path <-"Data/Potential_tree_cover/Output_calibration_and_reconstruction/"
 ```
 
 
+```{r}
+europe_extraction <- readRDS("C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Potential_tree_cover/extraction_points/potential_tree_gaussian_EUROPA_25_50km_modern_pollen.rds") |>
+  select(-c(Tree_Gaussian_50_sigma10,   
+            Tree_SD_50_sigma10,         
+            Tree_Median_50_sigma10,    
+            
+            Tree_Gaussian_50_sigma3,    
+            Tree_SD_50_sigma3,          
+            #Tree_Median_50_sigma3,      
+            
+            Tree_Gaussian_50_sigma2,    
+            Tree_SD_50_sigma2,          
+            #Tree_Median_50_sigma2,      
+            
+            Tree_Min_50,               
+            Tree_Max_50,                
+            
+            Tree_Gaussian_25_sigma10,   
+            Tree_SD_25_sigma10,         
+            Tree_Median_25_sigma10,     
+            
+            Tree_Gaussian_25_sigma3,    
+            Tree_SD_25_sigma3,          
+            Tree_Median_25_sigma3,     
+            
+            Tree_Gaussian_25_sigma2,    
+            Tree_SD_25_sigma2,          
+            Tree_Median_25_sigma2,      
+            
+            Tree_Min_25,                
+            Tree_Max_25  )) |>
+  select(id_sample, latitude, longitude, elevation, hill_n2, Tree_Median_50_sigma3, Tree_Median_50_sigma2, everything())
+
+europe_extraction 
+
+#colnames(europe_extraction)
+```
 
 
 ```{r}
@@ -97,7 +134,7 @@ Chunk 1: Initial set up and load data
 ```{r}
 
 # Definir las columnas target (las de extracción de raster)
-target_cols <- c( "Tree_Gaussian_50_sigma100", "Tree_Gaussian_50_sigma10",  "Tree_Gaussian_50_sigma3",   "Tree_Gaussian_50_sigma2",  "Tree_Gaussian_25_sigma100", "Tree_Gaussian_25_sigma10" , "Tree_Gaussian_25_sigma3" ,  "Tree_Gaussian_25_sigma2" )
+target_cols <- c( "Tree_Median_50_sigma3", "Tree_Median_50_sigma2" )
 
 
 # Identificar las columnas que NO son target (identificadores + taxa)
@@ -143,7 +180,7 @@ for (target in target_cols) {
 
 
 #latam_target_list[["Tree_Gaussian_25_sigma2"]]
-europe_target_list[["Tree_Gaussian_25_sigma2"]]
+europe_target_list[["Tree_Gaussian_50_sigma2"]]
 ```
 
 
@@ -162,7 +199,7 @@ europe_target_list <- europe_target_list |>
   )
 
 #latam_target_list[["Tree_Gaussian_25_sigma2"]]
-europe_target_list[["Tree_Gaussian_25_sigma2"]]
+europe_target_list[["Tree_Median_50_sigma3"]]
 ```
 
 Chunk 1: Extraer componentes para LATAM
@@ -211,7 +248,7 @@ latam_twapls_data <- map2(
   }
 )
 
-latam_twapls_data[["Tree_Gaussian_25_sigma2"]]$target
+latam_twapls_data[["Tree_Median_50_sigma3"]]$target
 ```
 
 
@@ -242,7 +279,7 @@ europe_twapls_data <- purrr::map2(
   }
 )
 
- range(europe_twapls_data[["Tree_Gaussian_25_sigma2"]]$target)
+ range(europe_twapls_data[["Tree_Median_50_sigma3"]]$target)
 ```
 
 
@@ -253,7 +290,7 @@ In the European dataset, the target distribution was strongly concentrated at lo
 
 A bin width of five percentage points was selected as a practical compromise. It reduced small-scale irregularity and provided greater support per interval than bin = 2.5, while retaining more information across the 0–100% tree-cover gradient than bin = 10. The high frequency in the first interval was retained because it represents a genuine feature of the calibration dataset rather than missing or erroneous data. Nevertheless, the final choice of bin width should be supported by cross-validation and sensitivity analyses to confirm that model performance and the selected number of PLS components are stable across reasonable alternative bin widths.
 ```{r}
-target_x <- europe_twapls_data[["Tree_Gaussian_25_sigma2"]]$target
+target_x <- europe_twapls_data[["Tree_Median_50_sigma3"]]$target
 
 
 purrr::map_dfr(c(0.05, 0.08, 0.25), \(bin_width) {
@@ -526,7 +563,7 @@ saveRDS(pseudo_targets_latam, "Data/Potential_tree_cover/Output_calibration_and_
 
 
 ```{r}
-iteration <- "i4"
+iteration <- "i5"
 
 cv_path <- "Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/"
 
@@ -572,7 +609,7 @@ cv_targets_europe <- purrr::imap(
         paste0(
           "cv_europe_",
           target_name,
-          "_bin0.2_",
+          "_bin0.2_median",
           iteration,
           ".csv"
         )
@@ -661,7 +698,53 @@ cv_targets_europe <- cv_files_europe |>
 
 cv_targets_europe <- cv_targets_europe |>
   purrr::map(as.data.frame)
+
+
+
 ```
+
+
+```{r}
+metadata <- c(
+  "id_sample",
+  "latitude",
+  "longitude",
+  "elevation",
+  "hill_n2"
+)
+
+for (modelo in modelos_comunes) {
+
+  cv <- cv_targets_europe[[modelo]]
+  target <- europe_target_list[[modelo]]
+
+  # Comprobaciones de seguridad
+  stopifnot(nrow(cv) == nrow(target))
+  
+  stopifnot(
+    isTRUE(all.equal(
+      cv$test.x,
+      target[[modelo]]
+    ))
+  )
+
+  # Añadir los 5 metadatos al inicio
+  cv_targets_europe[[modelo]] <- cbind(
+    target[, metadata, drop = FALSE],
+    cv
+  )
+}
+
+# Ver columnas de uno de los modelos modificados
+names(cv_targets_europe[["Tree_Gaussian_50_sigma10"]])
+```
+
+
+
+```{r}
+saveRDS(cv_targets_europe, "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/cv_targets_europe_bin0.2_i4.rds" )
+```
+
 
 
 ```{r}
@@ -691,6 +774,47 @@ cv_targets_latam <- cv_targets_latam |>
   purrr::map(as.data.frame)
 ```
 
+```{r}
+metadata <- c(
+  "id_sample",
+  "latitude",
+  "longitude",
+  "elevation",
+  "hill_n2"
+)
+
+for (modelo in modelos_comunes_latam) {
+
+  cv <- cv_targets_latam[[modelo]]
+  target <- latam_target_list[[modelo]]
+
+  # Comprobaciones de seguridad
+  stopifnot(nrow(cv) == nrow(target))
+
+  stopifnot(
+    isTRUE(all.equal(
+      cv$test.x,
+      target[[modelo]]
+    ))
+  )
+
+  # Añadir los metadatos al inicio
+  cv_targets_latam[[modelo]] <- cbind(
+    target[, metadata, drop = FALSE],
+    cv
+  )
+}
+
+names(
+  cv_targets_latam[["Tree_Gaussian_50_sigma10"]]
+)
+```
+
+```{r}
+saveRDS(cv_targets_latam, "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/cv_targets_latam_bin1.5_i4.rds" )
+
+
+```
 
 
 Random t-test 
@@ -759,7 +883,7 @@ rand_table_all <- bind_rows(
 
 
 ```{r}
-write.csv(rand_table_europe, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/random_t_test_europe_bin0.2.csv", row.names = FALSE)
+write.csv(rand_table_europe, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/random_t_test_europe_bin0.2_median_i5.csv", row.names = FALSE)
 
 write.csv(rand_table_latam, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/random_t_test_latam_bin1.5.csv", row.names = FALSE)
 
@@ -781,7 +905,7 @@ plot_data_latam <- cv_targets_latam[["Tree_Gaussian_50_sigma2"]] |>
   transmute(
     region = "LATAM",
     target = "Tree_Gaussian_50_sigma2",
-    component = 4L,
+    component = 3L,
     id_sample = latam_twapls_data[["Tree_Gaussian_50_sigma2"]]$ids,
     observed = test.x,
     predicted = comp4
@@ -790,7 +914,7 @@ plot_data_latam <- cv_targets_latam[["Tree_Gaussian_50_sigma2"]] |>
             by = "id_sample")
 
 aux_metrics <- rand_table_latam |>
-  filter(target == "Tree_Gaussian_50_sigma2" & n_comp == 4) |>
+  filter(target == "Tree_Gaussian_50_sigma2" & n_comp == 3) |>
   mutate(
     R2 = round(R2, 2),
     RMSEP = round(RMSEP, 2),
@@ -843,7 +967,7 @@ plot_data_europe <- cv_targets_europe[["Tree_Gaussian_50_sigma2"]] |>
   transmute(region = "Europe",
     target = "Tree_Gaussian_50_sigma2",
     component = 2L,
-    id_sample = europe_twapls_data[["Tree_Gaussian_50_sigma2"]]$ids,
+    id_sample = europe_twapls_data[["Tree_Median_50_sigma2"]]$ids,
     observed = test.x,
     predicted = comp2) |>
   left_join(select(europe_extraction, id_sample, latitude, longitude, elevation),
