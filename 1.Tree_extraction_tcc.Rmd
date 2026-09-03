@@ -5,22 +5,21 @@ date: "2026-06-24"
 ---
 
 Este es el codigo para transformar de clasesPoulter schemme
-
+*chunk1*
 ```{r}
 library(terra)
 library(tidyverse)
 library(tidyterra)
-#library(stringr)
 library(sf)
+library(matrixStats)
 ```
 
 
 Condigo para dos regiones simulataneas
+*chunk2*
 ```{r}
 # Load and prepare land polygon for South America
-land_polyg_latam <- sf::st_read(
-  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
-) |>
+land_polyg_latam <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
   sf::st_transform(crs = 4326) |>
   sf::as_Spatial() |>
   raster::crop(raster::extent(-118, -33, -55, 32)) |>
@@ -31,8 +30,7 @@ ggplot() + geom_sf(data = land_polyg_latam)
 
 
 # Load and prepare land polygon for Europe
-land_polyg_eur <- sf::st_read(
-  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+land_polyg_eur <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
   sf::st_transform(crs = 4326) |>
   sf::as_Spatial() |>
   raster::crop(raster::extent(-20, 62, 29, 75)) |> #min,x, max.x, min.y, max.y
@@ -41,7 +39,7 @@ land_polyg_eur <- sf::st_read(
 
 ggplot() + geom_sf(data = land_polyg_eur)
 ```
-
+*chunk3*
 ```{r}
 tema_map <- theme(panel.background = element_rect(fill="white",color="transparent"),
         panel.border = element_rect(fill="transparent",color="black"),
@@ -64,6 +62,7 @@ tema_map <- theme(panel.background = element_rect(fill="white",color="transparen
 
 
 LATAM
+*chunk4*
 ```{r}
 # Load the data frames from the RDS file
 data_latam <- readRDS("Data/Input/updated_modern_dataset_climate_hill.rds") |>
@@ -127,7 +126,7 @@ modern_pollen_latam <- modern_pollen_latam |>
 modern_pollen_latam
 ```
 
-
+*chunk5*
 ```{r}
 # Load the data frames from the RDS file
 data_europe <- read.csv("Data/Input/Modern_Pollen_TrIan_from_climate_recon_EMBSECBIO.csv") |>
@@ -177,14 +176,14 @@ modern_pollen_europe
 
 
 
-
+*chunk6*
 ```{r}
 saveRDS(modern_pollen_latam, "Data/Input/modern_pollen_latam.rds")
 
 saveRDS(modern_pollen_europe, "Data/Input/modern_pollen_europe.rds")
 ```
 
-
+*chunk7*
 ```{r}
 modern_pollen_latam <- readRDS("Data/Input/modern_pollen_latam.rds")
 
@@ -192,7 +191,7 @@ modern_pollen_europe <- readRDS("Data/Input/modern_pollen_europe.rds") |>
   filter(longitude <= 62 & latitude <= 75)
 ```
 
-
+*chunk8*
 ```{r}
 ggplot() +
  # geom_sf(data = land_polyg_eur) +
@@ -200,7 +199,7 @@ ggplot() +
 ```
 
 
-
+*chunk9*
 ```{r}
 r_tcc <- rast("C:/Datasets_Tree_Cover/Potential_Tree_Cover_Roebroek2025/tcc_current_climate.tif")
 
@@ -212,6 +211,7 @@ plot(r_tcc)
 
 
 Este solo se ejecuta una vez
+*chunk10*
 ```{r}
 # 2. CRS métrico (para medir distancias) y resolución común
 crs_metric <- "EPSG:6933"
@@ -259,6 +259,7 @@ plot(land_eur_metric, add = TRUE)
 
 ```
 
+*chunk11*
 ```{r}
 # 4. Guardar
 writeRaster(r_latam_crop, "Data/Potential_tree_cover/rasters/potential_tree_LATAM_EPSG6933_land.tif", overwrite = TRUE)
@@ -266,10 +267,8 @@ writeRaster(r_latam_crop, "Data/Potential_tree_cover/rasters/potential_tree_LATA
 writeRaster(r_europa_crop, "Data/Potential_tree_cover/rasters/potential_tree_EUROPA_EPSG6933_land.tif", overwrite = TRUE)
 ```
 
-
+*chunk12*
 ```{r}
-library(terra)
-
 # Abrir los rasters
 r_latam  <- rast("Data/Potential_tree_cover/rasters/potential_tree_LATAM_EPSG6933_land.tif")/100
 r_europa <- rast("Data/Potential_tree_cover/rasters/potential_tree_EUROPA_EPSG6933_land.tif")/100
@@ -281,6 +280,7 @@ plot(r_europa, main = "Tree cover - Europe")
 ```
 
 Plotting of the map
+*chunk13*
 ```{r}
 # ============================================================
 # 2. Reducir resolución SOLO para plotting
@@ -331,18 +331,20 @@ map_europe <- ggplot() +
   
 map_europe 
 ```
-
+*chunk14*
 ```{r}
 ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/Potential tree cover/Roebroek_map_bin.JPG", plot = map_latam,
        width = 4, height = 4, units = "in", dpi = 300)
 ```
 
+*chunk15*
 ```{r}
 ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/Potential tree cover/Roebroek_map_bin.JPG", plot = map_europe,
        width = 4, height = 4, units = "in", dpi = 300)
 ```
 
 1. Preparar únicamente id_sample, latitud y longitud
+*chunk16*
 ```{r}
 # Puntos LATAM
 pts_latam <- modern_pollen_latam |> dplyr::select(id_sample, latitude, longitude)
@@ -357,10 +359,9 @@ nrow(pts_europa)
 
 Como los radios son de 25 y 50 km, no quiero calcular distancias directamente en WGS84.
 Para empezar, podemos utilizar una proyección métrica global. Una opción práctica para este análisis es EPSG:6933, que trabaja en metros y es apropiada para análisis espaciales globales.
+*chunk17*
 ```{r}
-
 pts_latam_vect <- vect(pts_latam, geom = c("longitude", "latitude"), crs = "EPSG:4326")
-
 pts_europa_vect <- vect(pts_europa, geom = c("longitude", "latitude"), crs = "EPSG:4326")
 
 crs_metric <- "EPSG:6933"
@@ -373,6 +374,7 @@ pts_europa_metric <- project(pts_europa_vect, crs_metric)
 Aquí está una parte importante del diseño.
 Vamos a crear buffers de 50,000 m alrededor de cada punto:
 Y extraemos los píxeles del raster.
+*chunk18*
 ```{r}
 buffer50_latam <- buffer(pts_latam_metric, width = 50000)
 buffer50_europa <- buffer(pts_europa_metric, width = 50000)
@@ -386,6 +388,7 @@ extract50_europa <- terra::extract(r_europa, buffer50_europa, cells = TRUE, xy =
 
 4. Añadir las coordenadas de cada punto
 Necesitamos saber la distancia entre el centro de cada píxel y el punto correspondiente.
+*chunk19*
 ```{r}
 #Para LATAM:
 coords_latam <- crds(pts_latam_metric)
@@ -403,28 +406,24 @@ coords_europa <- data.frame(point_id = seq_len(nrow(pts_europa_metric)),
 
 
 #Ahora podemos añadir esas coordenadas a las extracciones:
-extract50_latam <- extract50_latam |>
-  left_join(coords_latam, by = c("ID" = "point_id"))
-
-extract50_europa <- extract50_europa |>
-  left_join(coords_europa, by = c("ID" = "point_id"))
+extract50_latam <- extract50_latam |> left_join(coords_latam, by = c("ID" = "point_id"))
+extract50_europa <- extract50_europa |> left_join(coords_europa, by = c("ID" = "point_id"))
 ```
 
 
 5. Calcular distancia de cada píxel al punto
 Como estamos en metros:
+*chunk20*
 ```{r}
-extract50_latam <- extract50_latam |> mutate(distance_m = sqrt((x - point_x)^2 +
-                                                                 (y - point_y)^2))
+extract50_latam <- extract50_latam |> mutate(distance_m = sqrt((x - point_x)^2 + (y - point_y)^2))
 
-extract50_europa <- extract50_europa |> mutate(distance_m = sqrt((x - point_x)^2 +
-                                                                   (y - point_y)^2))
+extract50_europa <- extract50_europa |> mutate(distance_m = sqrt((x - point_x)^2 + (y - point_y)^2))
 ```
 
 
 
 
-
+*chunk21*
 ```{r}
 #Test
 #Como los buffers son de 50 km, los máximos deberían quedar aproximadamente en 50,000 m o muy cerca. Puede haber una pequeña diferencia por el tamaño de los píxeles y porque usamos las coordenadas del centro de cada celda.
@@ -433,47 +432,38 @@ summary(extract50_europa$distance_m)
 
 max(extract50_latam$distance_m, na.rm = TRUE)
 max(extract50_europa$distance_m, na.rm = TRUE)
-
-#También puedes comprobar cuántos píxeles se están usando por punto:
-extract50_latam |>
-  count(ID) |>
-  summary()
-
-extract50_europa |>
-  count(ID) |>
-  summary()
 ```
 
-
+*chunk22*
 ```{r}
 saveRDS(extract50_latam, "Data/Potential_tree_cover/extraction_points/potential_treecover_extract_LATAM_50km_EPSG6933_1kmres.rds")
 
 saveRDS(extract50_europa, "Data/Potential_tree_cover/extraction_points/potential_treecover_extract_EUROPA_50km_EPSG6933_1kmres.rds")
 ```
 
-
+*chunk23*
 ```{r}
 extract50_latam <- readRDS("Data/Potential_tree_cover/extraction_points/potential_treecover_extract_LATAM_50km_EPSG6933_1kmres.rds")
 
 extract50_europa <- readRDS("Data/Potential_tree_cover/extraction_points/potential_treecover_extract_EUROPA_50km_EPSG6933_1kmres.rds")
 ```
 
-
+*chunk24*
 ```{r}
 glimpse(extract50_latam)
 ```
 
 
-
+*chunk25*
 ```{r}
 extract50_europa <- extract50_europa |> rename(tree_cover =`Tree cover carrying capacity`)
-
 extract50_latam <- extract50_latam |> rename(tree_cover =`Tree cover carrying capacity`)
 ```
 
 Ahora viene la parte de calcular los seis escenarios gaussianos. Como extract50_* son enormes, yo lo haría por región y por radio, evitando crear tres columnas permanentes de pesos.
 Empezaría con LATAM y, cuando comprobemos que funciona, hacemos exactamente lo mismo para Europa.
 Primero define los sigmas:
+*chunk26*
 ```{r}
 # Sigma para radio de 50 km
 sigma50_100 <- 50000 / 100   # 500 m
@@ -495,11 +485,9 @@ Aquí usamos todos los píxeles de extract50_latam. La regla de NA será exactam
 GAUSSIAN-WEIGHTED TREE COVER WITHIN A 50-km RADIUS — LATIN AMERICA
 
 Objective:
-
 For each modern pollen sample (ID), calculate the mean tree cover within a circular 50-km radius, weighting each raster pixel according to its distance from the sampling point using a Gaussian function.
 
 Pixels located close to the sampling point therefore contribute more strongly to the estimated tree-cover value than pixels located farther away.
-
 Three Gaussian weighting scenarios are calculated using the SAME 50-km extraction radius but different sigma (σ) values:
 
 * sigma = radius / 100 = 500 m
@@ -509,11 +497,9 @@ Three Gaussian weighting scenarios are calculated using the SAME 50-km extractio
 A smaller sigma produces a much stronger concentration of weight around the sampling point, whereas a larger sigma allows more distant pixels to contribute substantially to the final estimate.
 
 Gaussian weighting function:
-
 w = exp( - d² / (2 × σ²) )
 
 where:
-
 w = weight assigned to a raster pixel
 d = distance between the centre of the raster pixel and the pollen sample
 σ = standard deviation controlling the spatial decay of the Gaussian kernel
@@ -525,194 +511,102 @@ TreeCover_weighted = Σ(tree_cover_i × w_i) / Σ(w_i)
 Importantly, the denominator contains ONLY the weights associated with non-NA tree-cover pixels. Therefore, missing raster cells do not contribute either to the numerator or denominator.
 
 Missing-data criterion:
+# IMPORTANT:
+     The NA criterion is evaluated within sigma, but the Gaussian weighted
+     mean itself still uses all available pixels within the complete
+     50-km extraction radius
+--------------------------------------------------------
+La mediana ponderada te dice el valor “central” de tree cover después de dar más importancia a los píxeles cercanos. El SD ponderado te dice cuánto varían los valores alrededor de esa media ponderada.
 
-Before calculating the Gaussian-weighted mean, the proportion of NA pixels within the complete 50-km buffer is evaluated.
+Además, ambos están en las mismas unidades que tree cover. Si tree cover está en %, entonces mediana y SD están en puntos porcentuales.
 
-If MORE THAN 50% of the raster pixels within the buffer are NA, the final tree-cover estimate is assigned NA.
+Mean weighted   = 70
+Median weighted = 72
+SD weighted     = 4
 
-For example:
+indicates a landscape concentrated around 70–72%, and therefore relatively homogeneous.
 
-100 pixels, 51 NA → result = NA
-100 pixels, 50 NA → weighted mean calculated from the 50 valid pixels
-100 pixels, 20 NA → weighted mean calculated from the 80 valid pixels
+In contrast:
+Mean weighted   = 70
+Median weighted = 85
+SD weighted     = 25
 
-This criterion prevents tree-cover estimates from being calculated for sampling locations where the raster provides insufficient spatial coverage.
+suggests a much more heterogeneous and possibly asymmetric landscape: many pixels have high cover values, but others have low values that pull the mean downward.
+
+In fact, the combination of **mean + median + SD** is quite informative:
+
+* `Mean ≈ Median` + low SD → relatively homogeneous landscape.
+* `Mean ≈ Median` + high SD → substantial heterogeneity, but relatively symmetric.
+* `Mean < Median` → low/extreme values are pulling the mean downward.
+* `Mean > Median` → some high values are pulling the mean upward.
+* large difference between mean and median + high SD → highly heterogeneous and asymmetric distribution.
+
+What I **would not** do is directly interpret something like `SD = 15` versus `Median = 70` as a comparison of magnitude between the two metrics. The median represents **cover level**, whereas the SD represents **dispersion**.
 
 
-
-
-
+*chunk27*
 ```{r}
 results50_latam <- extract50_latam |>
   group_by(ID) |>
   summarise(
-
     # ========================================================================
     # SCENARIO 1
     # Radius = 50 km
-    # sigma = 50 km / 100 = 500 m
+    # sigma = 50 km / 10 = 5,000 m
     #
     # Missing-data rule:
-    # Evaluate data availability ONLY within one sigma (500 m).
-    # If more than 50% of the pixels located within 500 m are NA,
+    # Evaluate data availability only within one sigma (5 km).
+    # If more than 50% of the pixels located within 5 km are NA,
     # the final estimate is assigned NA.
     #
-    # IMPORTANT:
-    # The NA criterion is evaluated within sigma, but the Gaussian weighted
-    # mean itself still uses all available pixels within the complete
-    # 50-km extraction radius.
+    # The Gaussian-weighted statistics themselves use all valid pixels
+    # within the complete 50-km extraction radius.
     # ========================================================================
-
-    n_sigma100 = sum(distance_m <= sigma50_100),
-
-    n_na_sigma100 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma50_100
-    ),
-
-    Tree_Gaussian_50_sigma100 = if_else(
-
-      n_na_sigma100 > n_sigma100 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma50_100^2)
-          ),
-        na.rm = TRUE
-      ) /
-
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma50_100^2)
-          )
-        )
-    ),
-
-
+    n_sigma10 = sum(distance_m <= sigma50_10),
+    n_na_sigma10 = sum(is.na(tree_cover) & distance_m <= sigma50_10),
+    # Gaussian-weighted mean
+    Tree_Gaussian_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma50_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_10^2)))),
+    # Gaussian-weighted standard deviation
+    Tree_SD_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_10^2)) * (tree_cover - Tree_Gaussian_50_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_10^2))))),
+    # Gaussian-weighted median
+    Tree_Median_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_10^2)))),
     # ========================================================================
     # SCENARIO 2
     # Radius = 50 km
-    # sigma = 50 km / 10 = 5,000 m
-    #
-    # The NA criterion is evaluated using only pixels within 5 km.
+    # sigma = 50 km / 3 = 16,666.67 m
     # ========================================================================
-
-    n_sigma10 = sum(distance_m <= sigma50_10),
-
-    n_na_sigma10 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma50_10
-    ),
-
-    Tree_Gaussian_50_sigma10 = if_else(
-
-      n_na_sigma10 > n_sigma10 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma50_10^2)
-          ),
-        na.rm = TRUE
-      ) /
-
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma50_10^2)
-          )
-        )
-    ),
-
-
+    n_sigma3 = sum(distance_m <= sigma50_3),
+    n_na_sigma3 = sum(is.na(tree_cover) & distance_m <= sigma50_3),
+    # Gaussian-weighted mean
+    Tree_Gaussian_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma50_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_3^2)))),
+    # Gaussian-weighted standard deviation
+    Tree_SD_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_3^2)) * (tree_cover - Tree_Gaussian_50_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_3^2))))),
+    # Gaussian-weighted median
+    Tree_Median_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_3^2)))),
     # ========================================================================
     # SCENARIO 3
     # Radius = 50 km
-    # sigma = 50 km / 3 = 16,666.67 m
-    #
-    # The NA criterion is evaluated using only pixels within 16.67 km.
-    # ========================================================================
-
-    n_sigma3 = sum(distance_m <= sigma50_3),
-
-    n_na_sigma3 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma50_3
-    ),
-
-    Tree_Gaussian_50_sigma3 = if_else(
-
-      n_na_sigma3 > n_sigma3 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma50_3^2)
-          ),
-        na.rm = TRUE
-      ) /
-
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma50_3^2)
-          )
-        )
-    ),
-
-
-    # ========================================================================
-    # SCENARIO 4
-    # Radius = 50 km
     # sigma = 50 km / 2 = 25,000 m
-    #
-    # The NA criterion is evaluated using only pixels within 25 km.
     # ========================================================================
-
     n_sigma2 = sum(distance_m <= sigma50_2),
-
-    n_na_sigma2 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma50_2
-    ),
-
-    Tree_Gaussian_50_sigma2 = if_else(
-
-      n_na_sigma2 > n_sigma2 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma50_2^2)
-          ),
-        na.rm = TRUE
-      ) /
-
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma50_2^2)
-          )
-        )
-    ),
-
+    n_na_sigma2 = sum(is.na(tree_cover) & distance_m <= sigma50_2),
+    # Gaussian-weighted mean
+    Tree_Gaussian_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma50_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_2^2)))),
+    # Gaussian-weighted standard deviation
+    Tree_SD_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_2^2)) * (tree_cover - Tree_Gaussian_50_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_2^2))))),
+    # Gaussian-weighted median
+    Tree_Median_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_2^2)))),
+    # ========================================================================
+    # MINIMUM AND MAXIMUM WITHIN THE COMPLETE 50-km BUFFER
+    #
+    # These statistics are not Gaussian weighted.
+    # They describe the full range of observed tree-cover values
+    # among valid raster pixels within 50 km.
+    # ========================================================================
+    Tree_Min_50 = if_else(all(is.na(tree_cover)), NA_real_, min(tree_cover, na.rm = TRUE)),
+    Tree_Max_50 = if_else(all(is.na(tree_cover)), NA_real_, max(tree_cover, na.rm = TRUE)),
     .groups = "drop"
   )
-
 ```
 
 Una interpretación útil para documentar tus escenarios es recordar qué ocurre a una distancia igual a σ. En una gaussiana:
@@ -730,21 +624,28 @@ Así, para el radio de 50 km:
 Esto deja muy clara la diferencia conceptual: aunque los tres escenarios usan un radio máximo de 50 km, sigma100 es prácticamente una estimación muy local, sigma10 integra principalmente unos pocos kilómetros alrededor del sitio, y sigma3 incorpora información de una porción mucho mayor del paisaje.
 
 Verificacion antes de continuar
+*chunk28*
 ```{r}
-results50_latam |>
-  dplyr::select(
-    ID,
-    n_sigma100,
-    n_na_sigma100,
-    Tree_Gaussian_50_sigma100
-  ) |>
-  mutate(
-    prop_na_sigma100 = n_na_sigma100 / n_sigma100
-  ) |>
-  arrange(desc(prop_na_sigma100))
+glimpse(results25_latam)
+
+summary(results25_latam$Tree_Gaussian_25_sigma10)
+summary(results25_latam$Tree_SD_25_sigma10)
+summary(results25_latam$Tree_Median_25_sigma10)
+
+summary(results25_latam$Tree_Gaussian_25_sigma3)
+summary(results25_latam$Tree_SD_25_sigma3)
+summary(results25_latam$Tree_Median_25_sigma3)
+
+summary(results25_latam$Tree_Gaussian_25_sigma2)
+summary(results25_latam$Tree_SD_25_sigma2)
+summary(results25_latam$Tree_Median_25_sigma2)
+
+summary(results25_latam$Tree_Min_25)
+summary(results25_latam$Tree_Max_25)
 ```
 
 #Ahora seguimos con los escenarios  de 25 km
+*chunk29*
 ```{r}
 extract25_latam <- extract50_latam |> filter(distance_m <= 25000)
 
@@ -765,264 +666,145 @@ extract25_latam <- extract50_latam |> filter(distance_m <= 25000)
 ```
 
 
-
+*chunk30*
 ```{r}
 results25_latam <- extract25_latam |>
   group_by(ID) |>
   summarise(
-
     # ========================================================================
     # SCENARIO 1
     # Radius = 25 km
-    # sigma = 25 km / 100 = 250 m
+    # sigma = 25 km / 10 = 2,500 m
+    #
+    # Missing-data rule:
+    # Evaluate data availability only within one sigma (2.5 km).
+    # If more than 50% of the pixels located within 2.5 km are NA,
+    # the final estimate is assigned NA.
+    #
+    # The Gaussian-weighted statistics themselves use all valid pixels
+    # within the complete 25-km extraction radius.
     # ========================================================================
-
-    n_sigma100 = sum(distance_m <= sigma25_100),
-
-    n_na_sigma100 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma25_100
-    ),
-
-    Tree_Gaussian_25_sigma100 = if_else(
-
-      n_na_sigma100 > n_sigma100 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma25_100^2)
-          ),
-        na.rm = TRUE
-      ) /
-
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma25_100^2)
-          )
-        )
-    ),
-
-
+    n_sigma10 = sum(distance_m <= sigma25_10),
+    n_na_sigma10 = sum(is.na(tree_cover) & distance_m <= sigma25_10),
+    # Gaussian-weighted mean
+    Tree_Gaussian_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma25_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_10^2)))),
+    # Gaussian-weighted standard deviation
+    Tree_SD_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_10^2)) * (tree_cover - Tree_Gaussian_25_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_10^2))))),
+    # Gaussian-weighted median
+    Tree_Median_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_10^2)))),
     # ========================================================================
     # SCENARIO 2
     # Radius = 25 km
-    # sigma = 25 km / 10 = 2,500 m
+    # sigma = 25 km / 3 = 8,333.33 m
     # ========================================================================
-
-    n_sigma10 = sum(distance_m <= sigma25_10),
-
-    n_na_sigma10 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma25_10
-    ),
-
-    Tree_Gaussian_25_sigma10 = if_else(
-
-      n_na_sigma10 > n_sigma10 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma25_10^2)
-          ),
-        na.rm = TRUE
-      ) /
-
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma25_10^2)
-          )
-        )
-    ),
-
-
+    n_sigma3 = sum(distance_m <= sigma25_3),
+    n_na_sigma3 = sum(is.na(tree_cover) & distance_m <= sigma25_3),
+    # Gaussian-weighted mean
+    Tree_Gaussian_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma25_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_3^2)))),
+    # Gaussian-weighted standard deviation
+    Tree_SD_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_3^2)) * (tree_cover - Tree_Gaussian_25_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_3^2))))),
+    # Gaussian-weighted median
+    Tree_Median_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_3^2)))),
     # ========================================================================
     # SCENARIO 3
     # Radius = 25 km
-    # sigma = 25 km / 3 = 8,333.33 m
-    # ========================================================================
-
-    n_sigma3 = sum(distance_m <= sigma25_3),
-
-    n_na_sigma3 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma25_3
-    ),
-
-    Tree_Gaussian_25_sigma3 = if_else(
-
-      n_na_sigma3 > n_sigma3 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma25_3^2)
-          ),
-        na.rm = TRUE
-      ) /
-
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma25_3^2)
-          )
-        )
-    ),
-
-
-    # ========================================================================
-    # SCENARIO 4
-    # Radius = 25 km
     # sigma = 25 km / 2 = 12,500 m
     # ========================================================================
-
     n_sigma2 = sum(distance_m <= sigma25_2),
-
-    n_na_sigma2 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma25_2
-    ),
-
-    Tree_Gaussian_25_sigma2 = if_else(
-
-      n_na_sigma2 > n_sigma2 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma25_2^2)
-          ),
-        na.rm = TRUE
-      ) /
-
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma25_2^2)
-          )
-        )
-    ),
-
+    n_na_sigma2 = sum(is.na(tree_cover) & distance_m <= sigma25_2),
+    # Gaussian-weighted mean
+    Tree_Gaussian_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma25_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_2^2)))),
+    # Gaussian-weighted standard deviation
+    Tree_SD_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_2^2)) * (tree_cover - Tree_Gaussian_25_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_2^2))))),
+    # Gaussian-weighted median
+    Tree_Median_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_2^2)))),
+    # ========================================================================
+    # MINIMUM AND MAXIMUM WITHIN THE COMPLETE 25-km BUFFER
+    #
+    # These are not Gaussian weighted.
+    # They describe the full range of tree-cover values among valid pixels
+    # within the complete 25-km radius.
+    # ========================================================================
+    Tree_Min_25 = if_else(all(is.na(tree_cover)), NA_real_, min(tree_cover, na.rm = TRUE)),
+    Tree_Max_25 = if_else(all(is.na(tree_cover)), NA_real_, max(tree_cover, na.rm = TRUE)),
     .groups = "drop"
   )
 ```
 
 
-
+*chunk31*
 ```{r}
-summary(results25_latam$Tree_Gaussian_25_sigma100)
-summary(results25_latam$Tree_Gaussian_25_sigma10)
-summary(results25_latam$Tree_Gaussian_25_sigma3)
-summary(results25_latam$Tree_Gaussian_25_sigma2)
+glimpse(results25_latam)
 
-results25_latam |>
-  summarise(
-    n_samples = n(),
-    NA_sigma100 = sum(is.na(Tree_Gaussian_25_sigma100)),
-    NA_sigma10  = sum(is.na(Tree_Gaussian_25_sigma10)),
-    NA_sigma3   = sum(is.na(Tree_Gaussian_25_sigma3)),
-    NA_sigma2   = sum(is.na(Tree_Gaussian_25_sigma2))
-  )
+summary(results25_latam$Tree_Gaussian_25_sigma10)
+summary(results25_latam$Tree_SD_25_sigma10)
+summary(results25_latam$Tree_Median_25_sigma10)
+
+summary(results25_latam$Tree_Gaussian_25_sigma3)
+summary(results25_latam$Tree_SD_25_sigma3)
+summary(results25_latam$Tree_Median_25_sigma3)
+
+summary(results25_latam$Tree_Gaussian_25_sigma2)
+summary(results25_latam$Tree_SD_25_sigma2)
+summary(results25_latam$Tree_Median_25_sigma2)
+
+summary(results25_latam$Tree_Min_25)
+summary(results25_latam$Tree_Max_25)
 ```
 
+
+*chunk32*
 ```{r}
 tree_gaussian_latam <- results50_latam |>
-  dplyr::select(
-    ID,
-    Tree_Gaussian_50_sigma100,
-    Tree_Gaussian_50_sigma10,
-    Tree_Gaussian_50_sigma3,
-    Tree_Gaussian_50_sigma2
-  ) |>
-  left_join(
-    results25_latam |>
-      dplyr::select(
-        ID,
-        Tree_Gaussian_25_sigma100,
-        Tree_Gaussian_25_sigma10,
-        Tree_Gaussian_25_sigma3,
-        Tree_Gaussian_25_sigma2
-      ),
-    by = "ID"
-  )
+  dplyr::select(ID, Tree_Gaussian_50_sigma10, Tree_SD_50_sigma10, Tree_Median_50_sigma10, 
+                Tree_Gaussian_50_sigma3, Tree_SD_50_sigma3, Tree_Median_50_sigma3, 
+                Tree_Gaussian_50_sigma2, Tree_SD_50_sigma2, Tree_Median_50_sigma2, Tree_Min_50, Tree_Max_50) |>
+  left_join(results25_latam |> 
+              dplyr::select(ID, Tree_Gaussian_25_sigma10, Tree_SD_25_sigma10, Tree_Median_25_sigma10, 
+                            Tree_Gaussian_25_sigma3, Tree_SD_25_sigma3, Tree_Median_25_sigma3, Tree_Gaussian_25_sigma2,
+                            Tree_SD_25_sigma2, Tree_Median_25_sigma2, Tree_Min_25, Tree_Max_25), by = "ID")
 ```
 
-
+*chunk33*
 ```{r}
 id_lookup_latam <- pts_latam |>
-  mutate(ID = row_number()) |>
-  dplyr::select(
-    ID,
-    id_sample,
-    latitude,
-    longitude
-  )
+  mutate(ID = row_number()) |> dplyr::select(ID, id_sample, latitude, longitude)
 
-tree_gaussian_latam <- tree_gaussian_latam |>
-  left_join(
-    id_lookup_latam,
-    by = "ID"
-  ) |>
-  relocate(
-    id_sample,
-    latitude,
-    longitude,
-    .after = ID
-  )
+tree_gaussian_latam <- tree_gaussian_latam |> 
+  left_join(id_lookup_latam, by = "ID") |>
+  relocate(id_sample, latitude, longitude, .after = ID)
 ```
 
-
+*chunk34*
 ```{r}
 ggplot(data = tree_gaussian_latam) +
-  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma100)) +
+  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma10)) +
   scale_color_viridis_c(option = "plasma")
 
 ggplot(data = tree_gaussian_latam) +
-  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma2)) +
+  geom_point(aes(x=longitude, y=latitude, colour = Tree_SD_50_sigma10)) +
   scale_color_viridis_c(option = "plasma")
 ```
 
-
+*35*
 ```{r}
 saveRDS(tree_gaussian_latam, "Data/Potential_tree_cover/extraction_points/potential_tree_gaussian_LATAM_25_50km.rds")
 ```
 
-
+*36*
 ```{r}
 modern_pollen_latam_gaussian <- modern_pollen_latam |>
-  left_join(
-    tree_gaussian_latam |>
-      dplyr::select(
-        -ID,
-        -latitude,
-        -longitude
-      ),
-    by = "id_sample"
-  )
+  left_join(tree_gaussian_latam |> dplyr::select(-ID, -latitude, -longitude), by = "id_sample")
 ```
 
-
+*37*
 ```{r}
 saveRDS(modern_pollen_latam_gaussian, "Data/Potential_tree_cover/extraction_points/potential_tree_gaussian_LATAM_25_50km_modern_pollen.rds")
 ```
 
 
 Ahora empezamos con EUROPA
+*38*
 ```{r}
 # ============================================================
 # EUROPA — DEFINIR SIGMAS
@@ -1041,443 +823,196 @@ sigma25_3   <- 25000 / 3     # 8,333.33 m
 sigma25_2   <- 25000 / 2     # 12,500 m
 ```
 
-
+*39*
 ```{r}
-# ============================================================
-# EUROPA — GAUSSIAN TREE COVER, RADIO DE 50 KM
-# ============================================================
-
 results50_europa <- extract50_europa |>
   group_by(ID) |>
   summarise(
-
-    # --------------------------------------------------------
+    # ========================================================================
     # SCENARIO 1
     # Radius = 50 km
-    # sigma = 500 m
+    # sigma = 50 km / 10 = 5,000 m
     #
-    # La cobertura NA se evalúa únicamente dentro de 1 sigma.
-    # Si más del 50% de los píxeles dentro de sigma son NA,
-    # el resultado final se asigna como NA.
+    # Missing-data rule:
+    # Evaluate data availability only within one sigma (5 km).
+    # If more than 50% of the pixels located within 5 km are NA,
+    # the final estimate is assigned NA.
     #
-    # El promedio gaussiano, sin embargo, sigue utilizando
-    # todos los píxeles válidos dentro del radio completo
-    # de 50 km.
-    # --------------------------------------------------------
-
-    n_sigma100 = sum(distance_m <= sigma50_100),
-
-    n_na_sigma100 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma50_100
-    ),
-
-    Tree_Gaussian_50_sigma100 = if_else(
-      n_na_sigma100 > n_sigma100 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(-(distance_m^2) / (2 * sigma50_100^2)),
-        na.rm = TRUE
-      ) /
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma50_100^2)
-          )
-        )
-    ),
-
-
-    # --------------------------------------------------------
+    # The Gaussian-weighted statistics themselves use all valid pixels
+    # within the complete 50-km extraction radius.
+    # ========================================================================
+    n_sigma10 = sum(distance_m <= sigma50_10, na.rm = TRUE),
+    n_na_sigma10 = sum(is.na(tree_cover) & distance_m <= sigma50_10, na.rm = TRUE),
+    # Gaussian-weighted mean
+    Tree_Gaussian_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma50_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_10^2)), na.rm = TRUE)),
+    # Gaussian-weighted standard deviation
+    Tree_SD_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_10^2)) * (tree_cover - Tree_Gaussian_50_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_10^2)), na.rm = TRUE))),
+    # Gaussian-weighted median
+    Tree_Median_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_10^2)))),
+    # ========================================================================
     # SCENARIO 2
     # Radius = 50 km
-    # sigma = 5 km
-    # --------------------------------------------------------
-
-    n_sigma10 = sum(distance_m <= sigma50_10),
-
-    n_na_sigma10 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma50_10
-    ),
-
-    Tree_Gaussian_50_sigma10 = if_else(
-      n_na_sigma10 > n_sigma10 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(-(distance_m^2) / (2 * sigma50_10^2)),
-        na.rm = TRUE
-      ) /
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma50_10^2)
-          )
-        )
-    ),
-
-
-    # --------------------------------------------------------
+    # sigma = 50 km / 3 = 16,666.67 m
+    # ========================================================================
+    n_sigma3 = sum(distance_m <= sigma50_3, na.rm = TRUE),
+    n_na_sigma3 = sum(is.na(tree_cover) & distance_m <= sigma50_3, na.rm = TRUE),
+    # Gaussian-weighted mean
+    Tree_Gaussian_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma50_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_3^2)), na.rm = TRUE)),
+    # Gaussian-weighted standard deviation
+    Tree_SD_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_3^2)) * (tree_cover - Tree_Gaussian_50_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_3^2)), na.rm = TRUE))),
+    # Gaussian-weighted median
+    Tree_Median_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_3^2)))),
+    # ========================================================================
     # SCENARIO 3
     # Radius = 50 km
-    # sigma = 16.67 km
-    # --------------------------------------------------------
-
-    n_sigma3 = sum(distance_m <= sigma50_3),
-
-    n_na_sigma3 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma50_3
-    ),
-
-    Tree_Gaussian_50_sigma3 = if_else(
-      n_na_sigma3 > n_sigma3 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(-(distance_m^2) / (2 * sigma50_3^2)),
-        na.rm = TRUE
-      ) /
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma50_3^2)
-          )
-        )
-    ),
-
-
-    # --------------------------------------------------------
-    # SCENARIO 4
-    # Radius = 50 km
-    # sigma = 25 km
-    # --------------------------------------------------------
-
-    n_sigma2 = sum(distance_m <= sigma50_2),
-
-    n_na_sigma2 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma50_2
-    ),
-
-    Tree_Gaussian_50_sigma2 = if_else(
-      n_na_sigma2 > n_sigma2 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(-(distance_m^2) / (2 * sigma50_2^2)),
-        na.rm = TRUE
-      ) /
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma50_2^2)
-          )
-        )
-    ),
-
+    # sigma = 50 km / 2 = 25,000 m
+    # ========================================================================
+    n_sigma2 = sum(distance_m <= sigma50_2, na.rm = TRUE),
+    n_na_sigma2 = sum(is.na(tree_cover) & distance_m <= sigma50_2, na.rm = TRUE),
+    # Gaussian-weighted mean
+    Tree_Gaussian_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma50_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_2^2)), na.rm = TRUE)),
+    # Gaussian-weighted standard deviation
+    Tree_SD_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_2^2)) * (tree_cover - Tree_Gaussian_50_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_2^2)), na.rm = TRUE))),
+    # Gaussian-weighted median
+    Tree_Median_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma50_2^2)))),
+    # ========================================================================
+    # MINIMUM AND MAXIMUM WITHIN THE COMPLETE 50-km BUFFER
+    # ========================================================================
+    Tree_Min_50 = if (all(is.na(tree_cover))) {NA_real_} else {min(tree_cover, na.rm = TRUE)},
+    Tree_Max_50 = if (all(is.na(tree_cover))) {NA_real_} else {max(tree_cover, na.rm = TRUE)},
     .groups = "drop"
   )
 ```
 
 
 Revisamos
+*40*
 ```{r}
-summary(results50_europa$Tree_Gaussian_50_sigma100)
+summary(results50_europa$Tree_Min_50)
+summary(results50_europa$Tree_Max_50)
+
 summary(results50_europa$Tree_Gaussian_50_sigma10)
 summary(results50_europa$Tree_Gaussian_50_sigma3)
 summary(results50_europa$Tree_Gaussian_50_sigma2)
 ```
 
+*41*
 ```{r}
 # ============================================================
 # EUROPE — SELECT PIXELS WITHIN 25 KM
-# ============================================================
 
-extract25_europa <- extract50_europa |>
-  filter(distance_m <= 25000)
+extract25_europa <- extract50_europa |> filter(distance_m <= 25000)
 ```
 
 
-
+*42*
 ```{r}
-# ============================================================
-# EUROPE — GAUSSIAN-WEIGHTED TREE COVER WITHIN 25 KM
-# ============================================================
-#
-# Missing-data rule:
-#
-# For each Gaussian scenario, raster coverage is evaluated within
-# a distance equivalent to one sigma (σ).
-#
-# If MORE THAN 50% of the pixels located within 1σ are NA,
-# the tree-cover estimate is assigned NA.
-#
-# Otherwise, the Gaussian-weighted mean is calculated using all
-# valid tree-cover pixels within the complete 25-km radius.
-#
-# Therefore:
-#
-# sigma/100 -> coverage evaluated within    250 m
-# sigma/10  -> coverage evaluated within  2,500 m
-# sigma/3   -> coverage evaluated within  8,333 m
-# sigma/2   -> coverage evaluated within 12,500 m
-#
-# ============================================================
-
-
 results25_europa <- extract25_europa |>
   group_by(ID) |>
   summarise(
-
-    # ========================================================
+    # ========================================================================
     # SCENARIO 1
     # Radius = 25 km
-    # sigma = 25 km / 100 = 250 m
-    # ========================================================
-
-    n_sigma100 = sum(
-      distance_m <= sigma25_100
-    ),
-
-    n_na_sigma100 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma25_100
-    ),
-
-    Tree_Gaussian_25_sigma100 = if_else(
-
-      n_na_sigma100 > n_sigma100 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma25_100^2)
-          ),
-        na.rm = TRUE
-      ) /
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma25_100^2)
-          )
-        )
-    ),
-
-
-    # ========================================================
+    # sigma = 25 km / 10 = 2,500 m
+    #
+    # Missing-data rule:
+    # Evaluate data availability only within one sigma (2.5 km).
+    # If more than 50% of the pixels located within 2.5 km are NA,
+    # the final estimate is assigned NA.
+    #
+    # The Gaussian-weighted statistics themselves use all valid pixels
+    # within the complete 25-km extraction radius.
+    # ========================================================================
+    n_sigma10 = sum(distance_m <= sigma25_10, na.rm = TRUE),
+    n_na_sigma10 = sum(is.na(tree_cover) & distance_m <= sigma25_10, na.rm = TRUE),
+    # Gaussian-weighted mean
+    Tree_Gaussian_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma25_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_10^2)), na.rm = TRUE)),
+    # Gaussian-weighted standard deviation
+    Tree_SD_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_10^2)) * (tree_cover - Tree_Gaussian_25_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_10^2)), na.rm = TRUE))),
+    # Gaussian-weighted median
+    Tree_Median_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_10^2)))),
+    # ========================================================================
     # SCENARIO 2
     # Radius = 25 km
-    # sigma = 25 km / 10 = 2,500 m
-    # ========================================================
-
-    n_sigma10 = sum(
-      distance_m <= sigma25_10
-    ),
-
-    n_na_sigma10 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma25_10
-    ),
-
-    Tree_Gaussian_25_sigma10 = if_else(
-
-      n_na_sigma10 > n_sigma10 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma25_10^2)
-          ),
-        na.rm = TRUE
-      ) /
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma25_10^2)
-          )
-        )
-    ),
-
-
-    # ========================================================
+    # sigma = 25 km / 3 = 8,333.33 m
+    # ========================================================================
+    n_sigma3 = sum(distance_m <= sigma25_3, na.rm = TRUE),
+    n_na_sigma3 = sum(is.na(tree_cover) & distance_m <= sigma25_3, na.rm = TRUE),
+    # Gaussian-weighted mean
+    Tree_Gaussian_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma25_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_3^2)), na.rm = TRUE)),
+    # Gaussian-weighted standard deviation
+    Tree_SD_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_3^2)) * (tree_cover - Tree_Gaussian_25_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_3^2)), na.rm = TRUE))),
+    # Gaussian-weighted median
+    Tree_Median_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_3^2)))),
+    # ========================================================================
     # SCENARIO 3
     # Radius = 25 km
-    # sigma = 25 km / 3 = 8,333.33 m
-    # ========================================================
-
-    n_sigma3 = sum(
-      distance_m <= sigma25_3
-    ),
-
-    n_na_sigma3 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma25_3
-    ),
-
-    Tree_Gaussian_25_sigma3 = if_else(
-
-      n_na_sigma3 > n_sigma3 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma25_3^2)
-          ),
-        na.rm = TRUE
-      ) /
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma25_3^2)
-          )
-        )
-    ),
-
-
-    # ========================================================
-    # SCENARIO 4
-    # Radius = 25 km
     # sigma = 25 km / 2 = 12,500 m
-    # ========================================================
-
-    n_sigma2 = sum(
-      distance_m <= sigma25_2
-    ),
-
-    n_na_sigma2 = sum(
-      is.na(tree_cover) &
-        distance_m <= sigma25_2
-    ),
-
-    Tree_Gaussian_25_sigma2 = if_else(
-
-      n_na_sigma2 > n_sigma2 / 2,
-
-      NA_real_,
-
-      sum(
-        tree_cover *
-          exp(
-            -(distance_m^2) /
-              (2 * sigma25_2^2)
-          ),
-        na.rm = TRUE
-      ) /
-        sum(
-          exp(
-            -(distance_m[!is.na(tree_cover)]^2) /
-              (2 * sigma25_2^2)
-          )
-        )
-    ),
-
+    # ========================================================================
+    n_sigma2 = sum(distance_m <= sigma25_2, na.rm = TRUE),
+    n_na_sigma2 = sum(is.na(tree_cover) & distance_m <= sigma25_2, na.rm = TRUE),
+    # Gaussian-weighted mean
+    Tree_Gaussian_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(tree_cover * exp(-(distance_m^2) / (2 * sigma25_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_2^2)), na.rm = TRUE)),
+    # Gaussian-weighted standard deviation
+    Tree_SD_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_2^2)) * (tree_cover - Tree_Gaussian_25_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_2^2)), na.rm = TRUE))),
+    # Gaussian-weighted median
+    Tree_Median_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = tree_cover[!is.na(tree_cover)], w = exp(-(distance_m[!is.na(tree_cover)]^2) / (2 * sigma25_2^2)))),
+    # ========================================================================
+    # MINIMUM AND MAXIMUM WITHIN THE COMPLETE 25-km BUFFER
+    # ========================================================================
+    Tree_Min_25 = if (all(is.na(tree_cover))) { NA_real_ } else { min(tree_cover, na.rm = TRUE) },
+    Tree_Max_25 = if (all(is.na(tree_cover))) { NA_real_ } else { max(tree_cover, na.rm = TRUE) },
     .groups = "drop"
   )
 ```
 
 
-
+*43*
 ```{r}
-# ============================================================
-# UNIR RESULTADOS DE 50 KM Y 25 KM — EUROPA
-# ============================================================
-
 tree_gaussian_europa <- results50_europa |>
-  dplyr::select(
-    ID,
-    Tree_Gaussian_50_sigma100,
-    Tree_Gaussian_50_sigma10,
-    Tree_Gaussian_50_sigma3,
-    Tree_Gaussian_50_sigma2
-  ) |>
-  left_join(
-    results25_europa |>
-      dplyr::select(
-        ID,
-        Tree_Gaussian_25_sigma100,
-        Tree_Gaussian_25_sigma10,
-        Tree_Gaussian_25_sigma3,
-        Tree_Gaussian_25_sigma2
-      ),
-    by = "ID"
-  )
+  dplyr::select(ID, Tree_Gaussian_50_sigma10, Tree_SD_50_sigma10, Tree_Median_50_sigma10, 
+                Tree_Gaussian_50_sigma3, Tree_SD_50_sigma3, Tree_Median_50_sigma3, Tree_Gaussian_50_sigma2, 
+                Tree_SD_50_sigma2, Tree_Median_50_sigma2, Tree_Min_50, Tree_Max_50) |>
+  left_join(results25_europa |> 
+              dplyr::select(ID, Tree_Gaussian_25_sigma10, Tree_SD_25_sigma10, Tree_Median_25_sigma10, 
+                            Tree_Gaussian_25_sigma3, Tree_SD_25_sigma3, Tree_Median_25_sigma3, Tree_Gaussian_25_sigma2, 
+                            Tree_SD_25_sigma2, Tree_Median_25_sigma2, Tree_Min_25, Tree_Max_25), by = "ID")
 ```
 
-
+*44*
 ```{r}
 nrow(tree_gaussian_europa)
 ```
 
-
+*45*
 ```{r}
-id_lookup_europa <- pts_europa |>
-  mutate(ID = row_number()) |>
-  dplyr::select(
-    ID,
-    id_sample,
-    latitude,
-    longitude
-  )
+id_lookup_europa <- pts_europa |> 
+  mutate(ID = row_number()) |> 
+  dplyr::select(ID, id_sample, latitude, longitude)
 
-tree_gaussian_europa <- tree_gaussian_europa |>
-  left_join(
-    id_lookup_europa,
-    by = "ID"
-  ) |>
-  relocate(
-    id_sample,
-    latitude,
-    longitude,
-    .after = ID
-  )
+tree_gaussian_europa <- tree_gaussian_europa |> 
+  left_join(id_lookup_europa, by = "ID") |> 
+  relocate(id_sample, latitude, longitude, .after = ID)
 ```
 
-
+*46*
 ```{r}
 modern_pollen_europe_gaussian <- modern_pollen_europe |>
-  left_join(
-    tree_gaussian_europa |>
-      dplyr::select(
-        -ID,
-        -latitude,
-        -longitude
-      ),
-    by = "id_sample"
-  )
+  left_join(tree_gaussian_europa |> dplyr::select(-ID, -latitude, -longitude), by = "id_sample")
 ```
 
-
+*47*
 ```{r}
 ggplot(data = tree_gaussian_europa) +
-  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma100)) +
+  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma10)) +
   scale_color_viridis_c(option = "plasma")
 
 ggplot(data = tree_gaussian_europa) +
-  geom_point(aes(x=longitude, y=latitude, colour = Tree_Gaussian_50_sigma2)) +
+  geom_point(aes(x=longitude, y=latitude, colour = Tree_SD_50_sigma10)) +
   scale_color_viridis_c(option = "plasma")
 ```
 
-
+*48*
 ```{r}
 saveRDS(
   tree_gaussian_europa,
@@ -1490,4 +1025,489 @@ saveRDS(
 )
 ```
 
+
+```{r}
+modern_pollen_europe_gaussian |>
+  summarise(
+    cor_50_sigma10 = cor(
+      Tree_Gaussian_50_sigma10,
+      Tree_Median_50_sigma10,
+      use = "complete.obs"
+    ),
+
+    mae_50_sigma10 = mean(
+      abs(
+        Tree_Gaussian_50_sigma10 -
+          Tree_Median_50_sigma10
+      ),
+      na.rm = TRUE
+    )
+  )
+```
+
+
+```{r}
+ggplot(
+  modern_pollen_europe_gaussian,
+  aes(
+    x = Tree_Gaussian_50_sigma10,
+    y = Tree_Median_50_sigma10
+  )
+) +
+  geom_point(alpha = 0.3) +
+  geom_abline(
+    intercept = 0,
+    slope = 1
+  ) +
+  coord_equal()
+```
+
+
+```{r}
+comparison_mean_median_europe <- tibble(
+  scenario = c(
+    "50_sigma10",
+    "50_sigma3",
+    "50_sigma2",
+    "25_sigma10",
+    "25_sigma3",
+    "25_sigma2"
+  ),
+
+  correlation = c(
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma10,
+        modern_pollen_europe_gaussian$Tree_Median_50_sigma10,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma3,
+        modern_pollen_europe_gaussian$Tree_Median_50_sigma3,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma2,
+        modern_pollen_europe_gaussian$Tree_Median_50_sigma2,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma10,
+        modern_pollen_europe_gaussian$Tree_Median_25_sigma10,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma3,
+        modern_pollen_europe_gaussian$Tree_Median_25_sigma3,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma2,
+        modern_pollen_europe_gaussian$Tree_Median_25_sigma2,
+        use = "complete.obs")
+  ),
+
+  MAE = c(
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma10 -
+               modern_pollen_europe_gaussian$Tree_Median_50_sigma10), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma3 -
+               modern_pollen_europe_gaussian$Tree_Median_50_sigma3), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma2 -
+               modern_pollen_europe_gaussian$Tree_Median_50_sigma2), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma10 -
+               modern_pollen_europe_gaussian$Tree_Median_25_sigma10), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma3 -
+               modern_pollen_europe_gaussian$Tree_Median_25_sigma3), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma2 -
+               modern_pollen_europe_gaussian$Tree_Median_25_sigma2), na.rm = TRUE)
+  ),
+
+  mean_difference = c(
+    mean(modern_pollen_europe_gaussian$Tree_Median_50_sigma10 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma10, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_50_sigma3 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma3, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_50_sigma2 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma2, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_25_sigma10 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma10, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_25_sigma3 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma3, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_25_sigma2 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma2, na.rm = TRUE)
+  )
+)
+
+comparison_mean_median_europe
+```
+
+```{r}
+modern_pollen_europe_gaussian |>
+  filter(
+    !is.na(Tree_Gaussian_50_sigma10),
+    !is.na(Tree_Median_50_sigma10)
+  ) |>
+  mutate(
+    difference = Tree_Median_50_sigma10 -
+      Tree_Gaussian_50_sigma10
+  ) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(difference),
+    MAE = mean(abs(difference)),
+
+    mean_difference_below_20 = mean(
+      difference[Tree_Gaussian_50_sigma10 < 20]
+    ),
+
+    MAE_below_20 = mean(
+      abs(difference[Tree_Gaussian_50_sigma10 < 20])
+    )
+  )
+```
+
+```{r}
+modern_pollen_europe_gaussian |>
+  filter(
+    !is.na(Tree_Gaussian_50_sigma2),
+    !is.na(Tree_Median_50_sigma2)
+  ) |>
+  mutate(
+    difference = Tree_Median_50_sigma2 -
+      Tree_Gaussian_50_sigma2
+  ) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(difference),
+    MAE = mean(abs(difference)),
+
+    mean_difference_below_20 = mean(
+      difference[Tree_Gaussian_50_sigma2 < 20]
+    ),
+
+    MAE_below_20 = mean(
+      abs(difference[Tree_Gaussian_50_sigma2 < 20])
+    )
+  )
+```
+
+
+```{r}
+comparison_bins_50_sigma2 <- modern_pollen_europe_gaussian |>
+  filter(
+    !is.na(Tree_Gaussian_50_sigma2),
+    !is.na(Tree_Median_50_sigma2)
+  ) |>
+  mutate(
+    difference = Tree_Median_50_sigma2 - Tree_Gaussian_50_sigma2,
+
+    tree_bin = cut(
+      Tree_Gaussian_50_sigma2,
+      breaks = c(0, 10, 20, 40, 60, 80, 100),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = c(
+        "0–10",
+        "10–20",
+        "20–40",
+        "40–60",
+        "60–80",
+        "80–100"
+      )
+    )
+  ) |>
+  group_by(tree_bin) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(
+      difference,
+      na.rm = TRUE
+    ),
+
+    median_difference = median(
+      difference,
+      na.rm = TRUE
+    ),
+
+    MAE = mean(
+      abs(difference),
+      na.rm = TRUE
+    ),
+
+    SD_difference = sd(
+      difference,
+      na.rm = TRUE
+    ),
+
+    .groups = "drop"
+  )
+
+comparison_bins_50_sigma2
+```
+
+
+```{r}
+ggplot(
+  comparison_bins_50_sigma2,
+  aes(
+    x = tree_bin,
+    y = mean_difference
+  )
+) +
+  geom_col() +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  labs(
+    x = "Gaussian mean tree cover",
+    y = "Weighted median - weighted mean",
+    title = "Difference between weighted median and mean",
+    subtitle = "Europe, 50-km radius, sigma = 25 km"
+  ) +
+  theme_classic()
+```
+
+
+```{r}
+ggplot(
+  comparison_bins_50_sigma2,
+  aes(
+    x = tree_bin,
+    y = MAE
+  )
+) +
+  geom_col() +
+  labs(
+    x = "Gaussian mean tree cover",
+    y = "Mean absolute difference",
+    title = "Magnitude of mean-median differences",
+    subtitle = "Europe, 50-km radius, sigma = 25 km"
+  ) +
+  theme_classic()
+```
+
+
+```{r}
+comparison_bins_all_europe <- bind_rows(
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "50_sigma10",
+      mean_value = Tree_Gaussian_50_sigma10,
+      median_value = Tree_Median_50_sigma10
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "50_sigma3",
+      mean_value = Tree_Gaussian_50_sigma3,
+      median_value = Tree_Median_50_sigma3
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "50_sigma2",
+      mean_value = Tree_Gaussian_50_sigma2,
+      median_value = Tree_Median_50_sigma2
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "25_sigma10",
+      mean_value = Tree_Gaussian_25_sigma10,
+      median_value = Tree_Median_25_sigma10
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "25_sigma3",
+      mean_value = Tree_Gaussian_25_sigma3,
+      median_value = Tree_Median_25_sigma3
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "25_sigma2",
+      mean_value = Tree_Gaussian_25_sigma2,
+      median_value = Tree_Median_25_sigma2
+    )
+
+) |>
+  filter(
+    !is.na(mean_value),
+    !is.na(median_value)
+  ) |>
+  mutate(
+    difference = median_value - mean_value,
+
+    tree_bin = cut(
+      mean_value,
+      breaks = c(0, 10, 20, 40, 60, 80, 100),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = c(
+        "0–10",
+        "10–20",
+        "20–40",
+        "40–60",
+        "60–80",
+        "80–100"
+      )
+    )
+  ) |>
+  group_by(
+    scenario,
+    tree_bin
+  ) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(
+      difference,
+      na.rm = TRUE
+    ),
+
+    median_difference = median(
+      difference,
+      na.rm = TRUE
+    ),
+
+    MAE = mean(
+      abs(difference),
+      na.rm = TRUE
+    ),
+
+    SD_difference = sd(
+      difference,
+      na.rm = TRUE
+    ),
+
+    .groups = "drop"
+  )
+
+comparison_bins_all_europe
+```
+
+```{r}
+ggplot(
+  comparison_bins_all_europe,
+  aes(
+    x = tree_bin,
+    y = mean_difference,
+    group = scenario,
+    colour = scenario
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  geom_line() +
+  geom_point() +
+  labs(
+    x = "Gaussian mean tree cover",
+    y = "Weighted median - weighted mean",
+    colour = "Scenario",
+    title = "Weighted median versus weighted mean across tree-cover classes",
+    subtitle = "Europe"
+  ) +
+  theme_classic()
+```
+
+```{r}
+mean_median_diff_europe <- modern_pollen_europe_gaussian |>
+  mutate(
+    difference = Tree_Median_50_sigma2 -
+      Tree_Gaussian_50_sigma2,
+    abs_difference = abs(difference)
+  ) |>
+  dplyr::select(
+    id_sample,
+    latitude,
+    longitude,
+    Tree_Gaussian_50_sigma2,
+    Tree_Median_50_sigma2,
+    Tree_SD_50_sigma2,
+    difference,
+    abs_difference
+  ) |>
+  arrange(desc(abs_difference))
+
+head(mean_median_diff_europe, 20)
+```
+
+Ahora haría una prueba directa: ¿a mayor SD, mayor diferencia absoluta entre media y mediana?
+```{r}
+cor(
+  mean_median_diff_europe$Tree_SD_50_sigma2,
+  mean_median_diff_europe$abs_difference,
+  use = "complete.obs",
+  method = "spearman"
+)
+```
+
+Usaría primero Spearman porque no necesitamos asumir una relación lineal perfecta.
+
+Y el gráfico:
+```{r}
+ggplot(
+  mean_median_diff_europe,
+  aes(
+    x = Tree_SD_50_sigma2,
+    y = abs_difference
+  )
+) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(
+    method = "lm",
+    se = FALSE
+  ) +
+  labs(
+    x = "Gaussian-weighted SD of tree cover",
+    y = "|Weighted median - weighted mean|",
+    title = "Mean–median divergence increases with landscape heterogeneity",
+    subtitle = "Europe, 50-km radius, sigma = 25 km"
+  ) +
+  theme_classic()
+```
+
+```{r}
+comparison_by_sd_europe <- mean_median_diff_europe |>
+  filter(
+    !is.na(Tree_SD_50_sigma2),
+    !is.na(abs_difference)
+  ) |>
+  mutate(
+    sd_bin = cut(
+      Tree_SD_50_sigma2,
+      breaks = c(0, 5, 10, 15, 20, 25, Inf),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = c(
+        "0–5",
+        "5–10",
+        "10–15",
+        "15–20",
+        "20–25",
+        "25+"
+      )
+    )
+  ) |>
+  group_by(sd_bin) |>
+  summarise(
+    n = n(),
+    mean_abs_difference = mean(abs_difference),
+    median_abs_difference = median(abs_difference),
+    .groups = "drop"
+  )
+
+comparison_by_sd_europe
+```
 
