@@ -38,6 +38,17 @@ land_polyg_eur <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_pol
   #sf::st_transform(crs = 6933)
 
 ggplot() + geom_sf(data = land_polyg_eur)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_afr <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-22, 60, -40, 45)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf() #|>
+  #sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_afr)
 ```
 *chunk3*
 ```{r}
@@ -228,13 +239,14 @@ crs(r_tcc_metric)
 
 
 #Convertir poligonos a terra
-land_latam_vect <- vect(land_polyg_latam)
-land_eur_vect   <- vect(land_polyg_eur)
+#land_latam_vect <- vect(land_polyg_latam)
+#land_eur_vect   <- vect(land_polyg_eur)
+land_afr_vect   <- vect(land_polyg_afr)
 
 #Después transformamos los polígonos. land_polyg_latam y land_polyg_eur están en WGS84. No hay problema: simplemente los pasamos al mismo CRS métrico:
 land_latam_metric <- project(land_latam_vect, crs_metric)
 land_eur_metric <- project(land_eur_vect, crs_metric)
-
+land_afr_metric <- project(land_afr_vect, crs_metric)
 
 #Crop + mask
 #LATAM
@@ -247,14 +259,23 @@ r_europa_crop <- r_tcc_metric |>
   crop(land_eur_metric) |>
   mask(land_eur_metric)
 
+#AFRICA
+r_africa_crop <- r_tcc_metric |>
+  crop(land_afr_metric) |>
+  mask(land_afr_metric)
+
 res(r_latam_crop)
 res(r_europa_crop)
+res(r_africa_crop)
 
 plot(r_latam_crop, main = "Tree cover - Latin America")
 plot(land_latam_metric, add = TRUE)
 
 plot(r_europa_crop, main = "Tree cover - Europe")
 plot(land_eur_metric, add = TRUE)
+
+plot(r_africa_crop, main = "Tree cover - Africa")
+plot(land_afr_metric, add = TRUE)
 
 
 ```
@@ -265,6 +286,8 @@ plot(land_eur_metric, add = TRUE)
 writeRaster(r_latam_crop, "Data/Potential_tree_cover/rasters/potential_tree_LATAM_EPSG6933_land.tif", overwrite = TRUE)
 
 writeRaster(r_europa_crop, "Data/Potential_tree_cover/rasters/potential_tree_EUROPA_EPSG6933_land.tif", overwrite = TRUE)
+
+writeRaster(r_africa_crop, "Data/Potential_tree_cover/rasters/potential_tree_AFRICA_EPSG6933_land.tif", overwrite = TRUE)
 ```
 
 *chunk12*
@@ -272,11 +295,15 @@ writeRaster(r_europa_crop, "Data/Potential_tree_cover/rasters/potential_tree_EUR
 # Abrir los rasters
 r_latam  <- rast("Data/Potential_tree_cover/rasters/potential_tree_LATAM_EPSG6933_land.tif")/100
 r_europa <- rast("Data/Potential_tree_cover/rasters/potential_tree_EUROPA_EPSG6933_land.tif")/100
+r_africa <- rast("Data/Potential_tree_cover/rasters/potential_tree_AFRICA_EPSG6933_land.tif")/100
+
 
 
 plot(r_latam, main = "Tree cover - Latin America")
 
 plot(r_europa, main = "Tree cover - Europe")
+
+plot(r_africa, main = "Tree cover - Europe")
 ```
 
 Plotting of the map
@@ -290,17 +317,27 @@ agg_factor <- 3
 
 r_latam_plot  <- aggregate(r_latam,  fact = agg_factor, fun = mean, na.rm = TRUE)
 r_europa_plot <- aggregate(r_europa, fact = agg_factor, fun = mean, na.rm = TRUE)
+r_africa_plot <- aggregate(r_africa, fact = agg_factor, fun = mean, na.rm = TRUE)
+
 
 r_latam_plot  <- project(r_latam_plot, "EPSG:4326")
 r_europa_plot <- project(r_europa_plot, "EPSG:4326")
+r_africa_plot <- project(r_africa_plot, "EPSG:4326")
+
 # 3. Convertir a data.frame para plotting
 
 df_latam <- as.data.frame(r_latam_plot, xy = TRUE, na.rm = TRUE)
 df_europa <- as.data.frame(r_europa_plot, xy = TRUE, na.rm = TRUE)
+df_africa <- as.data.frame(r_africa_plot, xy = TRUE, na.rm = TRUE)
+
 
 # Renombrar la columna del raster
 names(df_latam)[3]  <- "tree_cover"
 names(df_europa)[3] <- "tree_cover"
+names(df_africa)[3] <- "tree_cover"
+
+
+saveRDS(df_africa, "C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/Potential tree cover/df_africa_Roebroek_down_resol.rds")
 
 #plot(r_latam_plot, main = "Tree cover - Latin America (reduced resolution)")
 #plot(r_latam, main = "Tree cover - Latin America")
@@ -330,6 +367,19 @@ map_europe <- ggplot() +
   
   
 map_europe 
+
+
+map_africa <- ggplot() +
+  geom_sf(data=land_polyg_afr) +
+  geom_tile(data = df_africa, aes(x=x, y=y, fill=tree_cover)) +
+  rcartocolor::scale_fill_carto_c(palette = "Temps",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, fill = "(%)", subtitle = "Potential tree cover (Roebroek et al., 2025)") +
+  tema_map
+  
+  
+map_africa
 ```
 *chunk14*
 ```{r}
