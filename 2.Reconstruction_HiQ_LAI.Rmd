@@ -1,0 +1,1116 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-07-05"
+---
+
+### Rationale and selection of the bin width for the *fx* correction
+
+The `fx` correction accounts for the frequency distribution of the target variable in the modern calibration dataset. This is relevant because tree-cover values are not represented uniformly: densely sampled portions of the gradient may have a disproportionate influence on model calibration, whereas uncommon values may be poorly represented. When `fx_method = "pspline"` is used, the frequency distribution is estimated and smoothed using a penalized spline. The `bin` parameter determines the width of the target intervals used to estimate this distribution and therefore controls the balance between resolution and stability. Very narrow bins preserve fine-scale variation but may produce noisy frequency estimates with limited observations per interval, whereas very wide bins provide more stable estimates but may obscure meaningful variation in the target gradient.
+
+#Identification of pseudo-sites
+
+To reduce the influence of spatial and environmental pseudoreplication during cross-validation, pseudo-sites were identified separately for each tree-cover target. Pseudo-sites are calibration samples that are both geographically close to the test sample and similar in their observed target value. In this analysis, similarity refers to tree cover rather than climate.
+
+# Leave-out cross-validation
+
+Predictive performance was evaluated separately for each region and tree-cover target using pseudo-site leave-out cross-validation. Unlike standard leave-one-out cross-validation, this procedure excludes not only the test sample but also calibration samples identified as its pseudo-sites. These samples are geographically close to the test site and have similar observed tree-cover values. Their exclusion reduces the risk of obtaining overly optimistic performance estimates due to spatial and environmental pseudoreplication.
+
+For each cross-validation cycle, the fxTWA-PLS model was recalibrated using the remaining samples and then used to predict the tree-cover value of the excluded test sample. Models were evaluated with up to five PLS components, using the P-spline frequency correction and a target bin width of five percentage points. The same model settings were applied to all tree-cover targets to facilitate comparison among Gaussian weighting scenarios.
+
+Cross-validation was conducted independently for each target because missing raster values resulted in slightly different sample compositions. Consequently, every target was evaluated using its corresponding pollen matrix, target vector, coordinate data, and pseudo-site structure. Results were saved separately immediately after completing each target to preserve completed calculations in the event of an interrupted run.
+
+# Randomization t-test and selection of PLS components
+
+A randomization t-test was applied to the cross-validation results to assess whether the addition of successive PLS components produced a statistically meaningful improvement in predictive performance. The test was conducted independently for every region and tree-cover target using 999 permutations.
+
+The procedure compares the reduction in cross-validated prediction error associated with each additional component against a distribution generated through randomization. Components were therefore assessed using both the change in root mean squared error of prediction (ΔRMSEP) and its associated permutation-based probability. A low probability indicates that the observed improvement in predictive performance is unlikely to have occurred by chance.
+
+The number of components should not be selected solely from the model with the lowest calibration error, as calibration error generally decreases when model complexity increases. Instead, component selection was based on cross-validated performance and the randomization test. Preference was given to the smallest model that captured the reproducible predictive signal, avoiding additional components that did not provide a statistically supported reduction in RMSEP.
+
+Randomization-test results were combined into a single table containing the region, tree-cover target, component number, cross-validation statistics, and permutation-test results. This allowed component performance to be compared consistently among Gaussian weighting scenarios and between Europe and Latin America.
+
+
+
+```{r}
+#You can install the released version of fxTWAPLS from CRAN with:
+#install.packages("fxTWAPLS")
+library(tidyverse)
+library(fxTWAPLS)
+library(foreach)
+```
+
+
+```{r}
+# Load and prepare land polygon for South America
+land_polyg_latam <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp"
+) |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-118, -33, -55, 32)) |>
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_latam)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_eur <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-20, 62, 29, 75)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_eur)
+```
+
+
+1. Setup – define constants and load data
+```{r}
+iteration <- "i1" 
+my_path <-"Data/HiQ_LAI/Output_calibration_and_reconstruction/"
+
+```
+
+
+```{r}
+# Load data (as before)
+europe_extraction <- readRDS("Data/HiQ_LAI/Extraction/HiQ_LAI_gaussian_EUROPA_25_50km_modern_pollen.rds") |>
+  dplyr::select(id_sample:hill_n2, starts_with("LAI_"), everything()) |>
+   dplyr::select(-c(LAI_SD_50_sigma10,
+                   LAI_SD_50_sigma2,
+                   LAI_SD_50_sigma3,
+                   
+                   LAI_Median_50_sigma10,
+                   LAI_Median_50_sigma3,
+                   LAI_Median_50_sigma2,
+                   
+                   LAI_Min_50,LAI_Max_50)) |>
+  
+  dplyr::select(-c(LAI_SD_25_sigma10,
+                   LAI_SD_25_sigma2,
+                   LAI_SD_25_sigma3,
+                   
+                   LAI_Median_25_sigma10,
+                   LAI_Median_25_sigma3,
+                   LAI_Median_25_sigma2,
+                   
+                   LAI_Min_25,LAI_Max_25)) 
+#set.seed(9751); europe_extraction <- sa`mple_n(europe_extraction, size = 250)
+```
+
+
+
+```{r}
+latam_extraction <- readRDS("Data/HiQ_LAI/Extraction/HiQ_LAI_gaussian_LATAM_25_50km_modern_pollen.rds") |>
+  dplyr::select(id_sample:hill_n2, starts_with("LAI_"), everything()) |>
+  dplyr::select(-c(LAI_SD_50_sigma10,
+                   LAI_SD_50_sigma2,
+                   LAI_SD_50_sigma3,
+                   
+                   LAI_Median_50_sigma10,
+                   LAI_Median_50_sigma3,
+                   LAI_Median_50_sigma2,
+                   
+                   LAI_Min_50,LAI_Max_50)) |>
+  
+  dplyr::select(-c(LAI_SD_25_sigma10,
+                   LAI_SD_25_sigma2,
+                   LAI_SD_25_sigma3,
+                   
+                   LAI_Median_25_sigma10,
+                 #Revisar porque no esta  LAI_Median_25_sigma3,
+                   LAI_Median_25_sigma2,
+                   
+                   LAI_Min_25,LAI_Max_25)) 
+#set.seed(9751); latam_extraction <- sample_n(latam_extraction, size = 250)
+```
+
+
+
+
+
+
+
+Chunk 1: Initial set up and load data
+```{r}
+
+# Definir las columnas target (las de extracción de raster)
+target_cols <- c( "LAI_Gaussian_50_sigma10", "LAI_Gaussian_50_sigma3", "LAI_Gaussian_50_sigma2", 
+                  "LAI_Gaussian_25_sigma10", "LAI_Gaussian_25_sigma3", "LAI_Gaussian_25_sigma2")
+
+
+# Identificar las columnas que NO son target (identificadores + taxa)
+# Para LATAM
+id_cols <- c("id_sample" ,    "latitude" ,        "longitude"       ,"elevation"   ,"hill_n2"  )
+```
+
+
+
+
+Identificar los taxones de cada dataset
+Y crear un da
+```{r}
+#=========== LATAM ========
+taxa_cols_latam <- setdiff(names(latam_extraction), 
+                          c(id_cols, target_cols))
+
+# Crear una lista de dataframes para LATAM, cada uno con un target diferente
+latam_target_list <- list()
+
+for (target in target_cols) {
+  # Seleccionar: identificadores + el target actual + todas las taxa
+  latam_target_list[[target]] <- latam_extraction %>%
+    dplyr::select(all_of(c(id_cols, target, taxa_cols_latam)))
+}
+
+
+
+#======= EUROPE ========
+taxa_cols_europe <- setdiff(names(europe_extraction), 
+                          c(id_cols, target_cols))
+
+# Crear una lista de dataframes para EUROPE, cada uno con un target diferente
+europe_target_list <- list()
+
+for (target in target_cols) {
+  # Seleccionar: identificadores + el target actual + todas las taxa
+  europe_target_list[[target]] <- europe_extraction %>%
+    dplyr::select(all_of(c(id_cols, target, taxa_cols_europe)))
+}
+
+
+
+
+#latam_target_list[["Tree_Gaussian_25_sigma2"]]
+europe_target_list[["LAI_Gaussian_50_sigma2"]]
+```
+
+
+Puedes filtrar cada dataframe según su propio target usando imap() de purrr. El nombre de cada elemento de la lista coincide con el nombre de su target.
+```{r}
+latam_target_list <- latam_target_list |>
+  purrr::imap(\(df, target) 
+    df |>
+      filter(!is.na(.data[[target]]))
+  )
+
+europe_target_list <- europe_target_list |>
+  purrr::imap(\(df, target) 
+    df |>
+      filter(!is.na(.data[[target]]))
+  )
+
+#latam_target_list[["Tree_Gaussian_25_sigma2"]]
+europe_target_list[["LAI_Gaussian_50_sigma2"]]
+```
+
+Chunk 1: Extraer componentes para LATAM
+Está desarmando cada dataframe en las cuatro piezas necesarias para aplicar posteriormente TWAPLS.
+latam_twapls_data will have a structure like this: 
+
+latam_twapls_data
+├── Tree_Gaussian_50_sigma100
+│   ├── taxa
+│   ├── target
+│   ├── coords
+│   └── ids
+├── Tree_Gaussian_50_sigma10
+│   ├── taxa
+│   ├── target
+│   ├── coords
+│   └── ids
+...
+└── Tree_Gaussian_25_sigma2
+    ├── taxa
+    ├── target
+    ├── coords
+    └── ids
+```{r}
+# Extraer componentes para LATAM
+latam_twapls_data <- map2(
+  latam_target_list,
+  names(latam_target_list),
+  ~ {
+    df <- .x
+    target <- .y
+    
+    # Busca cuáles columnas de id_cols realmente existen en el dataframe.
+    id_cols_present <- intersect(id_cols, names(df))
+    
+    # El target y las columnas fijas se excluyen de las taxa
+    exclude <- c(id_cols_present, target)
+    taxa_cols <- setdiff(names(df), exclude)
+    
+    list(
+      taxa = df %>% dplyr::select(all_of(taxa_cols)),
+      target = df[[target]],
+      coords = df %>% dplyr::select(longitude, latitude),
+      ids = df$id_sample
+    )
+  }
+)
+
+latam_twapls_data[["LAI_Gaussian_50_sigma2"]]$target
+```
+
+
+
+
+```{r}
+# Extraer componentes para EUROPA
+europe_twapls_data <- purrr::map2(
+  europe_target_list,
+  names(europe_target_list),
+  ~ {
+    df <- .x
+    target <- .y
+    
+    # Identificar las columnas fijas presentes
+    id_cols_present <- intersect(id_cols, names(df))
+    
+    # Excluir identificadores y el target de las columnas de taxones
+    exclude <- c(id_cols_present, target)
+    taxa_cols <- setdiff(names(df), exclude)
+    
+    list(
+      taxa = df |> dplyr::select(all_of(taxa_cols)),
+      target = df[[target]],
+      coords = df |> dplyr::select(longitude, latitude),
+      ids = df$id_sample
+    )
+  }
+)
+
+ range(europe_twapls_data[["LAI_Gaussian_50_sigma2"]]$target)
+```
+
+
+
+
+
+In the European dataset, the target distribution was strongly concentrated at low tree-cover values, followed by lower and irregular frequencies across the remaining range, although no intervals were empty. Bin widths of 2.5, 5, and 10 percentage points were compared. With bin = 2.5, the first interval contained 43 samples (17.8% of the dataset), while the remaining intervals had a median of six samples. With bin = 5, the first interval contained 49 samples (20.3%) and the remaining intervals had a median of 11 samples. With bin = 10, the corresponding values were 63 samples (26.1%) and a median of 21 samples.
+
+A bin width of five percentage points was selected as a practical compromise. It reduced small-scale irregularity and provided greater support per interval than bin = 2.5, while retaining more information across the 0–100% tree-cover gradient than bin = 10. The high frequency in the first interval was retained because it represents a genuine feature of the calibration dataset rather than missing or erroneous data. Nevertheless, the final choice of bin width should be supported by cross-validation and sensitivity analyses to confirm that model performance and the selected number of PLS components are stable across reasonable alternative bin widths.
+```{r}
+target_x <- europe_twapls_data[["LAI_Gaussian_50_sigma2"]]$target
+
+
+purrr::map_dfr(c(0.005, 0.02, 0.01), \(bin_width) {
+    
+    breaks_x <- seq(0, ceiling(max(target_x) / bin_width) * bin_width, by = bin_width)
+    
+    counts <- hist(target_x, breaks = breaks_x, plot = FALSE, include.lowest = TRUE)$counts
+    
+    tibble(bin = bin_width,first_bin_n = counts[1],
+      first_bin_percent = counts[1] / sum(counts) * 100,
+      median_other_bins = median(counts[-1]),
+      maximum_other_bin = max(counts[-1])
+    )
+  }
+)
+
+target_df <- tibble(target = target_x)
+
+p2 <- ggplot(target_df, aes(target)) +
+  geom_histogram(binwidth = 0.005, boundary = 0) +
+  theme_classic() +
+  labs(title = "bin = 0.005")
+
+p2.5 <- ggplot(target_df, aes(target)) +
+  geom_histogram(binwidth = 0.02, boundary = 0) +
+  theme_classic() +
+  labs(title = "bin = 0.02")
+
+p5 <- ggplot(target_df, aes(target)) +
+  geom_histogram(binwidth = 0.01, boundary = 0) +
+  theme_classic() +
+  labs(title = "bin = 0.01")
+
+
+p2
+
+
+p2.5
+p5
+
+
+bin_diagnostic <- purrr::map_dfr(
+  c(5,10,100),
+  \(bin_width) {
+    
+    breaks_x <- seq(
+      floor(min(target_x) / bin_width) * bin_width,
+      ceiling(max(target_x) / bin_width) * bin_width,
+      by = bin_width
+    )
+    
+    counts <- hist(
+      target_x,
+      breaks = breaks_x,
+      plot = FALSE,
+      include.lowest = TRUE
+    )$counts
+    
+    tibble(
+      bin = bin_width,
+      n_bins = length(counts),
+      empty_bins = sum(counts == 0),
+      percent_empty = mean(counts == 0) * 100,
+      bins_under_3 = sum(counts < 3),
+      percent_under_3 = mean(counts < 3) * 100,
+      bins_under_5 = sum(counts < 5),
+      percent_under_5 = mean(counts < 5) * 100,
+      median_n = median(counts),
+      mean_n = mean(counts),
+      maximum_n = max(counts)
+    )
+  }
+)
+
+bin_diagnostic
+```
+
+
+
+```{r}
+target_x <- latam_twapls_data[["LAI_Gaussian_25_sigma2"]]$target
+
+
+purrr::map_dfr(c(0.005, 0.02, 0.01), \(bin_width) {
+    
+    breaks_x <- seq(0, ceiling(max(target_x) / bin_width) * bin_width, by = bin_width)
+    
+    counts <- hist(target_x, breaks = breaks_x, plot = FALSE, include.lowest = TRUE)$counts
+    
+    tibble(bin = bin_width,first_bin_n = counts[1],
+      first_bin_percent = counts[1] / sum(counts) * 100,
+      median_other_bins = median(counts[-1]),
+      maximum_other_bin = max(counts[-1])
+    )
+  }
+)
+
+target_df <- tibble(target = target_x)
+
+p2 <- ggplot(target_df, aes(target)) +
+  geom_histogram(binwidth = 0.005, boundary = 0) +
+  theme_classic() +
+  labs(title = "bin = 0.005")
+
+p5 <- ggplot(target_df, aes(target)) +
+  geom_histogram(binwidth = 0.02, boundary = 0) +
+  theme_classic() +
+  labs(title = "bin = 0.02")
+
+p10 <- ggplot(target_df, aes(target)) +
+  geom_histogram(binwidth = 0.01, boundary = 0) +
+  theme_classic() +
+  labs(title = "bin = 0.01")
+
+p2
+p5
+p10
+
+bin_diagnostic <- purrr::map_dfr(
+  c(30,35,40,45),
+  \(bin_width) {
+    
+    breaks_x <- seq(
+      floor(min(target_x) / bin_width) * bin_width,
+      ceiling(max(target_x) / bin_width) * bin_width,
+      by = bin_width
+    )
+    
+    counts <- hist(
+      target_x,
+      breaks = breaks_x,
+      plot = FALSE,
+      include.lowest = TRUE
+    )$counts
+    
+    tibble(
+      bin = bin_width,
+      n_bins = length(counts),
+      empty_bins = sum(counts == 0),
+      percent_empty = mean(counts == 0) * 100,
+      bins_under_3 = sum(counts < 3),
+      percent_under_3 = mean(counts < 3) * 100,
+      bins_under_5 = sum(counts < 5),
+      percent_under_5 = mean(counts < 5) * 100,
+      median_n = median(counts),
+      mean_n = mean(counts),
+      maximum_n = max(counts)
+    )
+  }
+)
+
+bin_diagnostic
+```
+
+
+
+```{r, warning=FALSE}
+fit_targets_europe <- europe_twapls_data |>
+  purrr::map(
+    \(data) {
+      fxTWAPLS::TWAPLS.w2(
+        data$taxa,
+        data$target,
+        nPLS = 5,
+        usefx = TRUE,
+        fx_method = "pspline",
+        bin = 0.005
+      )
+    }
+  )
+
+
+
+fit_targets_latam <- latam_twapls_data |>
+  purrr::map(
+    \(data) {
+      fxTWAPLS::TWAPLS.w2(
+        data$taxa,
+        data$target,
+        nPLS = 5,
+        usefx = TRUE,
+        fx_method = "pspline",
+        bin = 0.02
+      )
+    }
+  )
+```
+
+
+
+
+Because samples with missing target values were removed independently for each target, the resulting datasets differed slightly in their sample composition. Geographic distance matrices were therefore calculated separately for every combination of region and tree-cover target, ensuring that the rows and columns of each matrix matched the corresponding pollen, target, coordinate, and sample-ID data.
+
+Pairwise geographic distances were calculated from sample longitude and latitude using get_distance(). The resulting distance matrix and the corresponding tree-cover target were then supplied to get_pseudo(). During cross-validation, the test sample and its associated pseudo-sites can be excluded from model training, providing a more conservative assessment of predictive performance by reducing the contribution of geographically close samples with similar tree-cover conditions.
+```{r, warning=FALSE}
+CPUS <- 10
+
+#Distancias para Eruopa
+dist_targets_europe <- europe_twapls_data |>
+  purrr::imap(
+    \(data, target_name) {
+      
+      message("Calculating distances for: ", target_name)
+      
+      fxTWAPLS::get_distance(
+        data$coords,
+        cpus = CPUS
+      )
+    }
+  )
+
+
+
+#Pseudosites para Europa
+pseudo_targets_europe <- purrr::map2(
+  dist_targets_europe,
+  europe_twapls_data,
+  \(distance_matrix, data) {
+    
+    fxTWAPLS::get_pseudo(
+      distance_matrix,
+      data$target,
+      cpus = CPUS
+    )
+  }
+)
+
+
+saveRDS(dist_targets_europe, "Data/HiQ_LAI/Output_calibration_and_reconstruction/dist_targets_europe_bin0.005.rds")
+
+
+saveRDS(pseudo_targets_europe, "Data/HiQ_LAI/Output_calibration_and_reconstruction/pseudo_targets_europe_bin0.005.rds")
+
+
+#Distancias para LATAM
+dist_targets_latam <- latam_twapls_data |>
+  purrr::imap(
+    \(data, target_name) {
+      
+      message("Calculating distances for: ", target_name)
+      
+      fxTWAPLS::get_distance(
+        data$coords,
+        cpus = CPUS
+      )
+    }
+  )
+
+
+#Pseudosites para LATAM
+pseudo_targets_latam <- purrr::map2(
+  dist_targets_latam,
+  latam_twapls_data,
+  \(distance_matrix, data) {
+    
+    fxTWAPLS::get_pseudo(
+      distance_matrix,
+      data$target,
+      cpus = CPUS
+    )
+  }
+)
+
+
+saveRDS(dist_targets_latam, "Data/HiQ_LAI/Output_calibration_and_reconstruction/dist_targets_latam_bin0.02.rds")
+
+
+saveRDS(pseudo_targets_latam, "Data/HiQ_LAI/Output_calibration_and_reconstruction/pseudo_targets_latam_bin0.02.rds")
+
+#iteration <- "i1"
+
+cv_path <- "Data/HiQ_LAI/Output_calibration_and_reconstruction/Cross_validation/"
+
+dir.create(
+  cv_path,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+
+
+#Validacion cruzada para Europa
+
+
+
+cv_targets_europe <- purrr::imap(
+  europe_twapls_data,
+  \(data, target_name) {
+    
+    message("Cross-validating Europe: ", target_name)
+    
+    pseudo <- pseudo_targets_europe[[target_name]]
+    
+    result <- fxTWAPLS::cv.pr.w(
+      data$taxa,
+      data$target,
+      nPLS = 5,
+      fxTWAPLS::TWAPLS.w2,
+      fxTWAPLS::TWAPLS.predict.w,
+      pseudo,
+      usefx = TRUE,
+      fx_method = "pspline",
+      bin = 0.005,
+      cpus = CPUS,
+      test_mode = FALSE
+    ) |>
+      fxTWAPLS::pb()
+    
+    write.csv(
+      result,
+      file.path(
+        cv_path,
+        paste0(
+          "cv_europe_",
+          target_name,
+          "_bin0.005_",
+          iteration,
+          ".csv"
+        )
+      ),
+      row.names = FALSE
+    )
+    
+    result
+  }
+)
+
+#Validacion cruzada para LATAM
+
+
+cv_targets_latam <- purrr::imap(
+  latam_twapls_data,
+  \(data, target_name) {
+    
+    message("Cross-validating LATAM: ", target_name)
+    
+    pseudo <- pseudo_targets_latam[[target_name]]
+    
+    result <- fxTWAPLS::cv.pr.w(
+      data$taxa,
+      data$target,
+      nPLS = 5,
+      fxTWAPLS::TWAPLS.w2,
+      fxTWAPLS::TWAPLS.predict.w,
+      pseudo,
+      usefx = TRUE,
+      fx_method = "pspline",
+      bin = 0.02,
+      cpus = CPUS,
+      test_mode = FALSE
+    ) |>
+      fxTWAPLS::pb()
+    
+    write.csv(
+      result,
+      file.path(
+        cv_path,
+        paste0(
+          "cv_latam_",
+          target_name,
+          "_bin0.02_",
+          iteration,
+          ".csv"
+        )
+      ),
+      row.names = FALSE
+    )
+    
+    result
+  }
+)
+```
+
+
+Cargar los archivos individuales 
+```{r}
+cv_path <- "Data/HiQ_LAI/Output_calibration_and_reconstruction/Cross_validation/"
+
+
+
+cv_files_europe <- list.files(
+  cv_path,
+  pattern = "^cv_europe_LAI_Gaussian_.*_bin0.005_i1\\.csv$",
+  full.names = TRUE)
+
+basename(cv_files_europe)
+length(cv_files_europe)
+
+
+target_names_europe <- basename(cv_files_europe) |>
+  stringr::str_remove("^cv_europe_") |>
+  stringr::str_remove("_bin0.005_i1.csv$")
+
+
+#4. Reconstruir la lista cv_targets europe
+cv_targets_europe <- cv_files_europe |>
+  purrr::map(readr::read_csv, show_col_types = FALSE) |> rlang::set_names(target_names_europe)
+
+
+cv_targets_europe <- cv_targets_europe |>
+  purrr::map(as.data.frame)
+
+
+
+```
+
+
+```{r}
+modelos_comunes <- intersect(names(cv_targets_europe), names(europe_target_list))
+
+metadata <- c("id_sample", "latitude", "longitude", "elevation", "hill_n2")
+
+for (modelo in modelos_comunes) {
+
+  cv <- cv_targets_europe[[modelo]]
+  target <- europe_target_list[[modelo]]
+
+  # Comprobaciones de seguridad
+  stopifnot(nrow(cv) == nrow(target))
+  
+  stopifnot(
+    isTRUE(all.equal(
+      cv$test.x,
+      target[[modelo]]
+    ))
+  )
+
+  # Añadir los 5 metadatos al inicio
+  cv_targets_europe[[modelo]] <- cbind(
+    target[, metadata, drop = FALSE],
+    cv
+  )
+}
+
+# Ver columnas de uno de los modelos modificados
+names(cv_targets_europe[["LAI_Gaussian_50_sigma10"]])
+```
+
+
+
+```{r}
+saveRDS(cv_targets_europe, "Data/HiQ_LAI/Output_calibration_and_reconstruction/Cross_validation/cv_targets_europe_bin0.005_i1.rds" )
+```
+
+
+
+```{r}
+cv_path <- "Data/HiQ_LAI/Output_calibration_and_reconstruction/Cross_validation/"
+
+cv_files_latam <- list.files(cv_path, pattern = "^cv_latam_LAI_Gaussian_.*_bin0.02_i1\\.csv$", full.names = TRUE)
+
+basename(cv_files_latam)
+length(cv_files_latam)
+
+target_names_latam <- basename(cv_files_latam) |> stringr::str_remove("^cv_latam_") |> stringr::str_remove("_bin0.02_i1.csv$")
+
+#4. Reconstruir la lista cv_targets europe
+cv_targets_latam <- cv_files_latam |> purrr::map(readr::read_csv, show_col_types = FALSE) |> rlang::set_names(target_names_latam)
+
+cv_targets_latam <- cv_targets_latam |> purrr::map(as.data.frame)
+```
+
+```{r}
+modelos_comunes <- intersect(names(cv_targets_latam), names(latam_target_list))
+
+metadata <- c("id_sample", "latitude", "longitude", "elevation", "hill_n2")
+
+for (modelo in modelos_comunes) {
+
+  cv <- cv_targets_latam[[modelo]]
+  target <- latam_target_list[[modelo]]
+
+  # Comprobaciones de seguridad
+  stopifnot(nrow(cv) == nrow(target))
+
+  stopifnot(
+    isTRUE(all.equal(
+      cv$test.x,
+      target[[modelo]]
+    ))
+  )
+
+  # Añadir los metadatos al inicio
+  cv_targets_latam[[modelo]] <- cbind(
+    target[, metadata, drop = FALSE],
+    cv
+  )
+}
+
+names(cv_targets_latam[["LAI_Gaussian_50_sigma10"]])
+```
+
+```{r}
+saveRDS(cv_targets_latam, "Data/GPP-GEOSIF/Output_calibration_and_reconstruction/Cross_validation/cv_targets_latam_bin0.02_i1.rds" )
+
+```
+
+
+Random t-test 
+```{r}
+#para Europa
+set.seed(9751)
+
+rand_targets_europe <- cv_targets_europe |>
+  purrr::imap(
+    \(cv_result, target_name) {
+      
+      message("Random t-test for Europe: ", target_name)
+      
+      fxTWAPLS::rand.t.test.w(
+        cv_result,
+        n.perm = 999
+      ) |>
+        as_tibble() |>
+        mutate(
+          region = "Europe",
+          target = target_name,
+          n_comp = row_number(),
+          .before = 1
+        )
+    }
+  )
+
+#para LATAM
+set.seed(9751)
+
+rand_targets_latam <- cv_targets_latam |>
+  purrr::imap(
+    \(cv_result, target_name) {
+      
+      message("Random t-test for LATAM: ", target_name)
+      
+      fxTWAPLS::rand.t.test.w(
+        cv_result,
+        n.perm = 999
+      ) |>
+        as_tibble() |>
+        mutate(
+          region = "LATAM",
+          target = target_name,
+          n_comp = row_number(),
+          .before = 1
+        )
+    }
+  )
+```
+
+
+```{r}
+rand_table_europe <- bind_rows(rand_targets_europe)
+
+rand_table_latam <- bind_rows(rand_targets_latam)
+```
+
+
+```{r}
+rand_table_all <- bind_rows(
+  rand_table_europe,
+  rand_table_latam) |>
+  dplyr::select(region, target, n_comp, everything())
+```
+
+
+```{r}
+write.csv(rand_table_europe, "Data/HiQ_LAI/Output_calibration_and_reconstruction/Cross_validation/random_t_test_europe_bin0.005_i1.csv", row.names = FALSE)
+
+
+write.csv(rand_table_latam, "Data/HiQ_LAI/Output_calibration_and_reconstruction/Cross_validation/random_t_test_latam_bin0.02_i1.csv", row.names = FALSE)
+
+```
+
+
+```{r}
+write.csv(
+  rand_table_all,
+  "Data/HiQ_LAI/Output_calibration_and_reconstruction/Cross_validation/random_t_test_all_regions_bin0.02latam_and_0.005europe.csv",
+  row.names = FALSE)
+```
+
+
+#Despues de una seleccion manual de los componentes
+
+```{r}
+plot_data_latam <- cv_targets_latam[["LAI_Gaussian_25_sigma2"]] |>
+  as_tibble() |>
+  transmute(
+    region = "LATAM",
+    target = "LAI_Gaussian_25_sigma2",
+    component = 1L,
+    id_sample = latam_twapls_data[["LAI_Gaussian_25_sigma2"]]$ids,
+    observed = test.x,
+    predicted = comp4
+  )  |>
+  left_join(dplyr::select(latam_extraction, id_sample, latitude, longitude, elevation),  by = "id_sample")
+
+
+aux_metrics <- rand_table_latam |>
+  filter(target == "LAI_Gaussian_25_sigma2" & n_comp == 1) |>
+  mutate(R2 = round(R2, 2), 
+         RMSEP = round(RMSEP, 2),
+         Compre.b1 = round(Compre.b1, 2),
+         )
+
+  # Texto para las métricas
+ metrics_text <- paste0(paste0("R² = ", aux_metrics$R2, "\n"),
+                         paste0("RMSEP = ", aux_metrics$RMSEP, "\n"),
+                         paste0("b1 = ", aux_metrics$Compre.b1))
+  
+
+
+# Calcular rangos extendidos (15% más allá de los datos)
+min_val <- min(c(plot_data_latam$observed, plot_data_latam$predicted), na.rm = TRUE)
+max_val <- max(c(plot_data_latam$observed, plot_data_latam$predicted), na.rm = TRUE)
+range_ext <- (max_val - min_val) * 0.1
+plot_min <- min_val - range_ext
+plot_max <- max_val + range_ext
+  
+
+
+plot_latam<- ggplot(plot_data_latam, aes(x = observed, y = predicted)) +
+    geom_point(alpha = 0.5, size = 0.6) +
+    geom_segment(x =  plot_min, y = plot_min, xend = plot_max, yend = plot_max, linetype = "dashed", color = "gray40") +
+    geom_smooth(method = "lm", se = FALSE, color = "firebrick3", linewidth = 0.8) +
+    coord_fixed(ratio = 1, xlim = c(plot_min, plot_max), ylim = c(plot_min, plot_max)) +
+    labs(x = "LAI", y = expression(italic(fx) ~ "TWA-PLS2  LAI"), subtitle = "LATAM") +
+    theme_bw() +
+    annotate("text", 
+             x = plot_min + 0.03*(plot_max - plot_min), 
+             y = plot_max - 0.03*(plot_max - plot_min), 
+             label = metrics_text,
+             hjust = 0, vjust = 1,
+             size = 2.6, family = "sans")
+
+plot_latam
+```
+
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/HiQ_LAI/performance_bin0.02.JPG", plot = plot_latam,width = 4, height = 4, units = "in", dpi = 300)
+```
+
+
+```{r}
+plot_data_europe <- cv_targets_europe[["LAI_Gaussian_25_sigma3"]] |>
+  as_tibble() |>
+  transmute(region = "Europe",
+    target = "LAI_Gaussian_25_sigma3",
+    component = 4L,
+    id_sample = europe_twapls_data[["LAI_Gaussian_25_sigma3"]]$ids,
+    observed = test.x,
+    predicted = comp2) |>
+  left_join(dplyr::select(europe_extraction, id_sample, latitude, longitude, elevation),
+            by = "id_sample")
+
+
+
+aux_metrics <- rand_table_europe |>
+  filter(target == "LAI_Gaussian_25_sigma3" & n_comp == 4) |>
+  mutate(
+    R2 = round(R2, 2),
+    RMSEP = round(RMSEP, 2),
+    Compre.b1 = round(Compre.b1, 2)
+  )
+
+  # Texto para las métricas
+ metrics_text <- paste0(paste0("R² = ", aux_metrics$R2, "\n"),
+                         paste0("RMSEP = ", aux_metrics$RMSEP, "\n"),
+                         paste0("b1 = ", aux_metrics$Compre.b1))
+  
+
+
+# Calcular rangos extendidos (15% más allá de los datos)
+min_val <- min(c(plot_data_europe$observed, plot_data_europe$predicted), na.rm = TRUE)
+max_val <- max(c(plot_data_europe$observed, plot_data_europe$predicted), na.rm = TRUE)
+range_ext <- (max_val - min_val) * 0.05
+plot_min <- min_val - range_ext
+plot_max <- max_val + range_ext
+  
+
+
+plot_europe <- ggplot(plot_data_europe, aes(x = observed, y = predicted)) +
+    geom_point(alpha = 0.3, size = 0.6) +
+    geom_segment(x =  plot_min, y = plot_min, xend = plot_max, yend = plot_max, linetype = "dashed", color = "gray40") +
+    geom_smooth(method = "lm", se = FALSE, color = "firebrick3", linewidth = 0.8) +
+    coord_fixed(ratio = 1, xlim = c(plot_min, plot_max), ylim = c(plot_min, plot_max)) +
+    labs(x = "LAI", y = expression(italic(fx) ~ "TWA-PLS2  LAI"), subtitle = "EUROPE") +
+    theme_bw() +
+    annotate("text", 
+             x = plot_min + 0.03*(plot_max - plot_min), 
+             y = plot_max - 0.03*(plot_max - plot_min), 
+             label = metrics_text,
+             hjust = 0, vjust = 1,
+             size = 2.6, family = "sans")
+  
+plot_europe
+```
+
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/HiQ_LAI/performance_bin0.005.JPG", plot = plot_europe,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+
+```{r}
+plot_diagnostic <- plot_data_final |>
+  filter(region == "Europe") |>
+  mutate(
+    residual = predicted - observed,
+    observed_class = cut(
+      observed,
+      breaks = c(-Inf, 20, 40, 60, 80, Inf),
+      labels = c(
+        "0–20",
+        "20–40",
+        "40–60",
+        "60–80",
+        "80–100"
+      )
+    )
+  ) |>
+  group_by(observed_class) |>
+  summarise(
+    n = n(),
+    mean_observed = mean(observed),
+    mean_predicted = mean(predicted),
+    mean_residual = mean(residual),
+    RMSEP = sqrt(mean(residual^2)),
+    .groups = "drop"
+  )
+
+plot_diagnostic
+```
+
+
+```{r}
+plot_data_europe_map <- plot_data_europe |> pivot_longer(cols = c(observed, predicted), names_to = "type", values_to = "value")
+
+
+plot_europe_map <- ggplot() +
+  geom_sf(data = land_polyg_eur, fill="gray50") +
+  geom_point(data = plot_data_europe_map, aes(x=longitude, y=latitude, colour = value), size=0.6) +
+  facet_wrap(~type) +
+  rcartocolor::scale_colour_carto_c(palette = "Earth",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, color = "LAI") +
+  theme(panel.background = element_rect(fill="gray88",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.28,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=7.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 7.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.05,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.54,0.55))
+
+plot_europe_map
+```
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/HiQ_LAI/performance_map_bin0.005.JPG", plot = plot_europe_map,
+       width = 8, height = 4, units = "in", dpi = 300)
+```
+
+
+
+
+
+```{r}
+plot_data_latam_map <- plot_data_latam |> pivot_longer(cols = c(observed, predicted), names_to = "type", values_to = "value")
+
+
+plot_latam_map <- ggplot() +
+  geom_sf(data = land_polyg_latam,fill="gray50") +
+  geom_point(data = plot_data_latam_map, aes(x=longitude, y=latitude, colour = value), size=0.7) +
+  facet_wrap(~type) +
+  rcartocolor::scale_colour_carto_c(palette = "Earth",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, color = "LAI") +
+  theme(panel.background = element_rect(fill="gray88",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.28,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=7.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 7.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.05,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.54,0.25))
+
+plot_latam_map
+```
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/HiQ_LAI/performance_map_bin0.02.JPG", 
+       plot = plot_latam_map,
+       width = 8, height = 4, units = "in", dpi = 300)
+```
+
+
+
+
