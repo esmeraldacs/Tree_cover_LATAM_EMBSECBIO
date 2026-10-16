@@ -1,0 +1,1349 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-06-24"
+---
+
+Este es el codigo para transformar de clasesPoulter schemme
+*chunk1*
+```{r}
+library(terra)
+library(tidyverse)
+library(tidyterra)
+library(sf)
+library(matrixStats)
+```
+
+
+Condigo para dos regiones simulataneas
+*chunk2*
+```{r}
+# Load and prepare land polygon for South America
+land_polyg_latam <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |> 
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-118, -33, -55, 32)) |>
+  sf::st_as_sf() #|>
+ # sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_latam)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_eur <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-20, 62, 29, 75)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf() #|>
+  #sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_eur)
+```
+
+*chunk3*
+```{r}
+tema_map <- theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.28,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=7.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 7.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.05,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.08,0.45))
+```
+
+
+LATAM
+*chunk4*
+```{r}
+# Load the data frames from the RDS file
+data_latam <- readRDS("Data/Input/updated_modern_dataset_climate_hill.rds") |>
+  select(-c(mapr, mi, gdd0, mat, mtco, mtwa, alpha, age_bp))
+
+data_latam
+
+#Remover taxa con valores de cero
+modern_pollen_latam <- data_latam |>
+  pivot_longer(cols = -c(id_sample:entity_type),names_to = "taxa") |>
+  filter(value > 0)
+
+#Remover taxa que ocurren en menos del 1 % de las muestas
+n_total <- n_distinct(modern_pollen_latam$id_sample)
+
+aux1 <- modern_pollen_latam |>
+  group_by(taxa) |>
+  mutate(n_samples = n_distinct(id_sample)) |>
+  ungroup() |>
+  filter(n_samples >= 0.002 * n_total) |>
+  select(-n_samples)
+
+#Funcion para manejar casos donde todos en el grupo son NAs
+mode_na <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) {
+    return(NA_character_)
+  }
+  names(sort(table(x), decreasing = TRUE))[1]
+}
+
+modern_pollen_latam <- aux1 |>
+  group_by(id_sample) |>
+  mutate(value = value / sum(value)) |>
+  ungroup() |>
+  arrange(taxa) |>
+  pivot_wider(
+    id_cols = c(id_sample:entity_type),
+    names_from = "taxa",
+    values_fill = 0
+  ) |>
+  select(-c(id_sample, entity_name)) |>
+  group_by(latitude, longitude) |>
+  summarise(
+    across(
+      where(is.numeric),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    site_type = mode_na(site_type),
+    entity_type = mode_na(entity_type),
+    .groups = "drop"
+  ) |>
+  mutate(id_sample = paste0("ID_", row_number())) |>
+  select(id_sample, everything())
+
+
+modern_pollen_latam <- modern_pollen_latam |>
+  select(id_sample:elevation, site_type, entity_type, everything()) |>
+  select(-site_type, -entity_type)
+  
+modern_pollen_latam
+```
+
+*chunk5*
+```{r}
+# Load the data frames from the RDS file
+data_europe <- read.csv("Data/Input/Modern_Pollen_TrIan_from_climate_recon_EMBSECBIO.csv") |>
+  select(-c(X, gdd, MI, Tmin, alpha)) |>
+  rename(latitude = Lat, 
+         longitude = Long, 
+         elevation = Elv,
+         entity_name = Entity.name,
+         hill_n2 = Hill_N2) |>
+  mutate(id_sample = row_number()) |>
+  select(id_sample, everything())
+
+
+#Remover taxa con valores de cero
+modern_pollen_europe <- data_europe |>
+  pivot_longer(cols = -c(id_sample:hill_n2),names_to = "taxa") |>
+  filter(value > 0)
+
+#Remover taxa que ocurren en menos del 1 % de las muestas
+n_total <- n_distinct(modern_pollen_europe$id_sample)
+
+aux2 <- modern_pollen_europe |>
+  group_by(taxa) |>
+  mutate(n_samples = n_distinct(id_sample)) |>
+  ungroup() |>
+  filter(n_samples >= 0.002 * n_total) |>
+  select(-n_samples)
+
+
+modern_pollen_europe <- aux2 |>
+  group_by(id_sample) |>
+  mutate(value = value / sum(value)) |>
+  ungroup() |>
+  arrange(taxa) |>
+  pivot_wider(id_cols = c(id_sample:hill_n2), 
+              names_from = "taxa", values_fill = 0) |>
+  select(-c(id_sample, entity_name)) |>
+  group_by(latitude, longitude) |>
+  summarise(across(where(is.numeric),~ mean(.x, na.rm = TRUE)),.groups = "drop") |>
+  mutate(id_sample = paste0("ID_", row_number())) |>
+  select(id_sample, everything())
+
+  
+modern_pollen_europe
+```
+
+
+
+
+*chunk6*
+```{r}
+saveRDS(modern_pollen_latam, "Data/Input/modern_pollen_latam.rds")
+
+saveRDS(modern_pollen_europe, "Data/Input/modern_pollen_europe.rds")
+```
+
+*chunk7*
+```{r}
+modern_pollen_latam <- readRDS("Data/Input/modern_pollen_latam.rds")
+
+modern_pollen_europe <- readRDS("Data/Input/modern_pollen_europe.rds") |>
+  filter(longitude <= 62 & latitude <= 75)
+```
+
+*chunk8*
+```{r}
+ggplot() +
+  geom_sf(data = land_polyg_eur) +
+  geom_point(data = modern_pollen_europe, aes(x=longitude, y=latitude)) 
+```
+
+
+*chunk9*
+
+```{r}
+# Carpeta donde guardaste los GeoTIFF descargados de Google Drive
+lai_dir <- "G:/Mi unidad/HiQ_LAI/"
+
+# Promedio interanual HiQ-LAI, ya escalado a unidades físicas de LAI
+lai_europe <- rast(file.path(lai_dir, "HiQ_LAI_mean_2001_2022_Europe_500m.tif"))
+lai_latam <- rast(file.path(lai_dir, "HiQ_LAI_mean_2001_2022_LATAM_500m.tif"))
+
+# Nombres claros de las capas
+names(lai_europe) <- "LAI_mean_2001_2022"
+names(lai_latam)  <- "LAI_mean_2001_2022"
+
+# Comprobaciones básicas
+lai_europe
+lai_latam
+
+global(lai_europe, c("min", "max", "mean"), na.rm = TRUE)
+global(lai_latam,  c("min", "max", "mean"), na.rm = TRUE)
+```
+
+
+
+
+
+##########
+##########
+Este solo se ejecuta una vez
+*chunk10*
+```{r}
+
+# CRS métricos regionales, en metros
+crs_europe_metric <- "EPSG:3035"  # European LAEA
+crs_latam_metric  <- paste("+proj=laea +lat_0=-12 +lon_0=-75", "+datum=WGS84 +units=m +no_defs")
+
+# Polígonos de tierra en los CRS correspondientes
+land_europe_metric <- project(vect(land_polyg_eur), crs_europe_metric)
+land_latam_metric <- project(vect(land_polyg_latam), crs_latam_metric)
+
+# Proyectar los rasters de LAI:
+# LAI es una variable continua, por eso usamos interpolación bilineal.
+# res = 500 crea una cuadrícula métrica de aproximadamente 500 m.
+lai_europe_metric <- project(lai_europe, crs_europe_metric, method = "bilinear", res = 500)
+lai_latam_metric <- project(lai_latam, crs_latam_metric, method = "bilinear", res = 500)
+
+# Recortar y enmascarar al área terrestre
+lai_europe_land <- lai_europe_metric |> crop(land_europe_metric) |> mask(land_europe_metric)
+lai_latam_land <- lai_latam_metric |> crop(land_latam_metric) |> mask(land_latam_metric)
+
+# Comprobación
+res(lai_europe_land)
+res(lai_latam_land)
+crs(lai_europe_land)
+crs(lai_latam_land)
+
+plot(lai_europe_land)
+
+plot(lai_latam_land)
+
+```
+
+
+*chunk11*
+```{r}
+# 4. Guardar
+writeRaster(lai_latam_land,  "HiQ_LAI_mean_2001_2022_LATAM_500m_land_LAEA.tif", overwrite = TRUE)
+
+writeRaster(lai_europe_land, "HiQ_LAI_mean_2001_2022_Europe_500m_land_EPSG3035.tif", overwrite = TRUE)
+```
+
+*chunk12*
+```{r}
+# Abrir los rasters
+r_latam  <- rast("HiQ_LAI_mean_2001_2022_LATAM_500m_land_LAEA.tif")
+r_europa <- rast("HiQ_LAI_mean_2001_2022_Europe_500m_land_EPSG3035.tif")
+
+
+plot(r_latam, main = " HiQ_LAI - LATAM" )
+
+plot(r_europa, main = "HiQ_LAI - Europe")
+```
+
+Plotting of the map
+*chunk13*
+```{r}
+# 13. Mapas de comprobación del LAI medio interanual
+
+# Agregar temporalmente de 500 m a ~10 km para graficar
+lai_europe_map <- aggregate(lai_europe, fact = 10, fun = mean, na.rm = TRUE)
+lai_latam_map  <- aggregate(lai_latam,  fact = 10, fun = mean, na.rm = TRUE)
+
+names(lai_europe_map) <- "LAI"
+names(lai_latam_map)  <- "LAI"
+
+# Convertir a tibbles para ggplot
+lai_europe_df <- lai_europe_map |>
+  as.data.frame(xy = TRUE, na.rm = TRUE) |>
+  as_tibble()
+
+lai_latam_df <- lai_latam_map |>
+  as.data.frame(xy = TRUE, na.rm = TRUE) |>
+  as_tibble()
+
+# Europa
+plot_lai_europe <- ggplot() +
+  geom_tile(data = lai_europe_df, aes(x = x, y = y, fill = LAI)) +
+  geom_sf(data = land_polyg_eur, fill = NA, colour = "grey20", linewidth = 0.2) +
+  rcartocolor::scale_fill_carto_c(palette = "Earth",direction = -1) +
+  #scale_fill_viridis_c(name = "LAI", option = "C", limits = c(0, 7), oob = scales::squish, na.value = "transparent") +
+  labs(subtitle = "HiQ-LAI 2001–2022") +
+  coord_sf(expand = FALSE) +
+  tema_map
+
+plot_lai_europe
+
+# LATAM
+plot_lai_latam <- ggplot() +
+  geom_tile(data = lai_latam_df, aes(x = x, y = y, fill = LAI)) +
+  geom_sf(data = land_polyg_latam, fill = NA, colour = "grey20", linewidth = 0.2) +
+  rcartocolor::scale_fill_carto_c(palette = "Earth",direction = -1) +
+ # scale_fill_viridis_c(name = "LAI", option = "C", limits = c(0, 7), oob = scales::squish, na.value = "transparent") +
+  labs(subtitle = "HiQ-LAI 2001–2022", x=NULL, y=NULL) +
+  coord_sf(expand = FALSE) +
+  tema_map
+
+plot_lai_latam
+```
+*chunk14*
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/HiQ_LAI/HiQ_LAI_map_bin.JPG", plot = plot_lai_latam,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+*chunk15*
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/HiQ_LAI/HiQ_LAI_map_bin.JPG", plot = plot_lai_europe,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+1. Preparar únicamente id_sample, latitud y longitud
+*chunk16*
+```{r}
+# Puntos LATAM
+pts_latam <- modern_pollen_latam |> dplyr::select(id_sample, latitude, longitude)
+# Puntos Europa
+pts_europa <- modern_pollen_europe |> dplyr::select(id_sample, latitude, longitude)
+
+nrow(pts_latam)
+nrow(pts_europa)
+```
+
+2. Trabajar en un CRS métrico
+
+Como los radios son de 25 y 50 km, no quiero calcular distancias directamente en WGS84.
+Para empezar, podemos utilizar una proyección métrica global. Una opción práctica para este análisis es EPSG:6933, que trabaja en metros y es apropiada para análisis espaciales globales.
+*chunk17*
+```{r}
+# 17. Convertir puntos de polen a objetos espaciales y proyectarlos
+
+# Puntos de origen en coordenadas geográficas
+pts_latam_vect <- vect(pts_latam, geom = c("longitude", "latitude"), crs = "EPSG:4326")
+pts_europa_vect <- vect(pts_europa, geom = c("longitude", "latitude"), crs = "EPSG:4326")
+
+# Proyectar cada conjunto al mismo CRS métrico que su raster de LAI
+pts_latam_metric <- project(pts_latam_vect, crs_latam_metric)
+pts_europa_metric <- project(pts_europa_vect, crs_europe_metric)
+
+```
+
+3. Extraer los píxeles dentro de 50 km
+Aquí está una parte importante del diseño.
+Vamos a crear buffers de 50,000 m alrededor de cada punto:
+Y extraemos los píxeles del raster.
+*chunk18*
+```{r}
+buffer50_latam <- buffer(pts_latam_metric, width = 50000)
+buffer50_europa <- buffer(pts_europa_metric, width = 50000)
+
+
+extract50_latam <- terra::extract(r_latam, buffer50_latam, cells = TRUE, xy = TRUE)
+extract50_europa <- terra::extract(r_europa, buffer50_europa, cells = TRUE, xy = TRUE)
+
+```
+
+
+4. Añadir las coordenadas de cada punto
+Necesitamos saber la distancia entre el centro de cada píxel y el punto correspondiente.
+*chunk19*
+```{r}
+#Para LATAM:
+coords_latam <- crds(pts_latam_metric)
+
+coords_latam <- data.frame(point_id = seq_len(nrow(pts_latam_metric)),
+                           point_x = coords_latam[, 1],
+                           point_y = coords_latam[, 2])
+
+#Para Europa
+coords_europa <- crds(pts_europa_metric)
+
+coords_europa <- data.frame(point_id = seq_len(nrow(pts_europa_metric)),
+                            point_x = coords_europa[, 1],
+                            point_y = coords_europa[, 2])
+
+
+#Ahora podemos añadir esas coordenadas a las extracciones:
+extract50_latam <- extract50_latam |> left_join(coords_latam, by = c("ID" = "point_id"))
+extract50_europa <- extract50_europa |> left_join(coords_europa, by = c("ID" = "point_id"))
+```
+
+
+5. Calcular distancia de cada píxel al punto
+Como estamos en metros:
+*chunk20*
+```{r}
+extract50_latam <- extract50_latam |> mutate(distance_m = sqrt((x - point_x)^2 + (y - point_y)^2))
+
+extract50_europa <- extract50_europa |> mutate(distance_m = sqrt((x - point_x)^2 + (y - point_y)^2))
+```
+
+
+
+
+*chunk21*
+```{r}
+#Test
+#Como los buffers son de 50 km, los máximos deberían quedar aproximadamente en 50,000 m o muy cerca. Puede haber una pequeña diferencia por el tamaño de los píxeles y porque usamos las coordenadas del centro de cada celda.
+summary(extract50_latam$distance_m)
+summary(extract50_europa$distance_m)
+
+max(extract50_latam$distance_m, na.rm = TRUE)
+max(extract50_europa$distance_m, na.rm = TRUE)
+```
+
+
+
+
+Ahora viene la parte de calcular los seis escenarios gaussianos. Como extract50_* son enormes, yo lo haría por región y por radio, evitando crear tres columnas permanentes de pesos.
+Empezaría con LATAM y, cuando comprobemos que funciona, hacemos exactamente lo mismo para Europa.
+Primero define los sigmas:
+*chunk26*
+```{r}
+# Sigma para radio de 50 km
+#sigma50_100 <- 50000 / 100   # 500 m
+sigma50_10  <- 50000 / 10    # 5,000 m
+sigma50_3   <- 50000 / 3     # 16,666.67 m
+sigma50_2   <- 50000 / 2     # 25,000 m
+
+# Sigma para radio de 25 km
+#sigma25_100 <- 25000 / 100   # 250 m
+sigma25_10  <- 25000 / 10    # 2,500 m
+sigma25_3   <- 25000 / 3     # 8,333.33 m
+sigma25_2   <- 25000 / 2     # 12,500 m
+```
+
+
+1. LATAM — escenarios de 50 km
+Aquí usamos todos los píxeles de extract50_latam. La regla de NA será exactamente la que acordamos: si más de la mitad de los píxeles del buffer son NA, el resultado será NA.
+
+GAUSSIAN-WEIGHTED TREE COVER WITHIN A 50-km RADIUS — LATIN AMERICA
+
+Objective:
+For each modern pollen sample (ID), calculate the mean tree cover within a circular 50-km radius, weighting each raster pixel according to its distance from the sampling point using a Gaussian function.
+
+Pixels located close to the sampling point therefore contribute more strongly to the estimated tree-cover value than pixels located farther away.
+Three Gaussian weighting scenarios are calculated using the SAME 50-km extraction radius but different sigma (σ) values:
+
+* sigma = radius / 100 = 500 m
+* sigma = radius / 10 = 5,000 m
+* sigma = radius / 3 = 16,666.67 m
+
+A smaller sigma produces a much stronger concentration of weight around the sampling point, whereas a larger sigma allows more distant pixels to contribute substantially to the final estimate.
+
+Gaussian weighting function:
+w = exp( - d² / (2 × σ²) )
+
+where:
+w = weight assigned to a raster pixel
+d = distance between the centre of the raster pixel and the pollen sample
+σ = standard deviation controlling the spatial decay of the Gaussian kernel
+
+The Gaussian-weighted tree-cover estimate is:
+
+TreeCover_weighted = Σ(tree_cover_i × w_i) / Σ(w_i)
+
+Importantly, the denominator contains ONLY the weights associated with non-NA tree-cover pixels. Therefore, missing raster cells do not contribute either to the numerator or denominator.
+
+Missing-data criterion:
+# IMPORTANT:
+     The NA criterion is evaluated within sigma, but the Gaussian weighted
+     mean itself still uses all available pixels within the complete
+     50-km extraction radius
+--------------------------------------------------------
+La mediana ponderada te dice el valor “central” de tree cover después de dar más importancia a los píxeles cercanos. El SD ponderado te dice cuánto varían los valores alrededor de esa media ponderada.
+
+Además, ambos están en las mismas unidades que tree cover. Si tree cover está en %, entonces mediana y SD están en puntos porcentuales.
+
+Mean weighted   = 70
+Median weighted = 72
+SD weighted     = 4
+
+indicates a landscape concentrated around 70–72%, and therefore relatively homogeneous.
+
+In contrast:
+Mean weighted   = 70
+Median weighted = 85
+SD weighted     = 25
+
+suggests a much more heterogeneous and possibly asymmetric landscape: many pixels have high cover values, but others have low values that pull the mean downward.
+
+In fact, the combination of **mean + median + SD** is quite informative:
+
+* `Mean ≈ Median` + low SD → relatively homogeneous landscape.
+* `Mean ≈ Median` + high SD → substantial heterogeneity, but relatively symmetric.
+* `Mean < Median` → low/extreme values are pulling the mean downward.
+* `Mean > Median` → some high values are pulling the mean upward.
+* large difference between mean and median + high SD → highly heterogeneous and asymmetric distribution.
+
+What I **would not** do is directly interpret something like `SD = 15` versus `Median = 70` as a comparison of magnitude between the two metrics. The median represents **cover level**, whereas the SD represents **dispersion**.
+
+
+*chunk27*
+```{r}
+# 27. Estadísticos gaussianos de LAI: LATAM, radio de 50 km
+extract50_latam <- extract50_latam |> rename(LAI = LAI_mean_2001_2022)
+
+results50_latam <- extract50_latam |>
+  group_by(ID) |>
+  summarise(
+    # ========================================================================
+    # SCENARIO 1: radio = 50 km; sigma = 5 km
+    # La disponibilidad se evalúa dentro de un sigma.
+    # Los estadísticos usan todos los píxeles válidos dentro de 50 km.
+    # ========================================================================
+    n_sigma10 = sum(distance_m <= sigma50_10),
+    n_na_sigma10 = sum(is.na(LAI) & distance_m <= sigma50_10),
+    LAI_Gaussian_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma50_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_10^2)))),
+    LAI_SD_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_10^2)) * (LAI - LAI_Gaussian_50_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_10^2))))),
+    LAI_Median_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_10^2)))),
+    # ========================================================================
+    # SCENARIO 2: radio = 50 km; sigma = 16,666.67 m
+    # ========================================================================
+    n_sigma3 = sum(distance_m <= sigma50_3),
+    n_na_sigma3 = sum(is.na(LAI) & distance_m <= sigma50_3),
+    LAI_Gaussian_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma50_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_3^2)))),
+    LAI_SD_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_na_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_3^2)) * (LAI - LAI_Gaussian_50_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_3^2))))),
+    LAI_Median_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_3^2)))),
+    # ========================================================================
+    # SCENARIO 3: radio = 50 km; sigma = 25 km
+    # ========================================================================
+    n_sigma2 = sum(distance_m <= sigma50_2),
+    n_na_sigma2 = sum(is.na(LAI) & distance_m <= sigma50_2),
+    LAI_Gaussian_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma50_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_2^2)))),
+    LAI_SD_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_2^2)) * (LAI - LAI_Gaussian_50_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_2^2))))),
+    LAI_Median_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_2^2)))),
+    # Rango de LAI entre píxeles válidos dentro del radio completo de 50 km
+    LAI_Min_50 = if_else(all(is.na(LAI)), NA_real_, min(LAI, na.rm = TRUE)),
+    LAI_Max_50 = if_else(all(is.na(LAI)), NA_real_, max(LAI, na.rm = TRUE)),
+    .groups = "drop"
+  )
+```
+
+Una interpretación útil para documentar tus escenarios es recordar qué ocurre a una distancia igual a σ. En una gaussiana:
+w = e⁻¹ᐟ² ≈ 0.607
+
+Así, para el radio de 50 km:
+| Distancia | σ = 0.5 km | σ = 5 km | σ = 16.67 km |
+| --------- | ---------: | -------: | -----------: |
+| 0 km      |          1 |        1 |            1 |
+| 0.5 km    |      0.607 |    0.995 |           ~1 |
+| 5 km      |         ~0 |    0.607 |        0.956 |
+| 16.7 km   |         ~0 |    0.004 |        0.607 |
+| 50 km     |         ~0 |       ~0 |        0.011 |
+
+Esto deja muy clara la diferencia conceptual: aunque los tres escenarios usan un radio máximo de 50 km, sigma100 es prácticamente una estimación muy local, sigma10 integra principalmente unos pocos kilómetros alrededor del sitio, y sigma3 incorpora información de una porción mucho mayor del paisaje.
+
+
+#Ahora seguimos con los escenarios  de 25 km
+*chunk29*
+```{r}
+extract25_latam <- extract50_latam |> filter(distance_m <= 25000)
+
+#verificacion de que el filtro quedo bien
+#Debería:
+#máximo = 25,000 m
+#mediana de distancia ≈ 17.68 km
+#media ≈ 16.67 km
+#~31,416 píxeles por punto
+#Ese número cuadra casi perfecto con el área teórica de un círculo de 25 km a 250 m de resolución:
+#250² × π × 25,000² ≈ 31,416
+
+
+#summary(extract25_latam$distance_m)
+#max(extract25_latam$distance_m,na.rm = TRUE)
+
+#extract25_latam |> count(ID) |> summary()
+```
+
+
+*chunk30*
+```{r}
+# 30. Estadísticos gaussianos de LAI: LATAM, radio de 25 km
+
+results25_latam <- extract25_latam |>
+  group_by(ID) |>
+  summarise(
+    # ========================================================================
+    # SCENARIO 1: radio = 25 km; sigma = 2.5 km
+    # ========================================================================
+    n_sigma10 = sum(distance_m <= sigma25_10),
+    n_na_sigma10 = sum(is.na(LAI) & distance_m <= sigma25_10),
+    LAI_Gaussian_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma25_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_10^2)))),
+    LAI_SD_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_10^2)) * (LAI - LAI_Gaussian_25_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_10^2))))),
+    LAI_Median_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_10^2)))),
+    # ========================================================================
+    # SCENARIO 2: radio = 25 km; sigma = 8,333.33 m
+    # ========================================================================
+    n_sigma3 = sum(distance_m <= sigma25_3),
+    n_na_sigma3 = sum(is.na(LAI) & distance_m <= sigma25_3),
+    LAI_Gaussian_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma25_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_3^2)))),
+    LAI_SD_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_3^2)) * (LAI - LAI_Gaussian_25_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_3^2))))),
+    LAI_Median_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_3^2)))),
+    # ========================================================================
+    # SCENARIO 3: radio = 25 km; sigma = 12.5 km
+    # ========================================================================
+    n_sigma2 = sum(distance_m <= sigma25_2),
+    n_na_sigma2 = sum(is.na(LAI) & distance_m <= sigma25_2),
+    LAI_Gaussian_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma25_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_2^2)))),
+    LAI_SD_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_2^2)) * (LAI - LAI_Gaussian_25_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_2^2))))),
+    LAI_Median_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_2^2)))),
+    # Rango de LAI entre píxeles válidos dentro del radio completo de 25 km
+    LAI_Min_25 = if_else(all(is.na(LAI)), NA_real_, min(LAI, na.rm = TRUE)),
+    LAI_Max_25 = if_else(all(is.na(LAI)), NA_real_, max(LAI, na.rm = TRUE)),
+    .groups = "drop"
+  )
+```
+
+
+
+
+*chunk32*
+```{r}
+# 32. Unir los resultados de LAI para radios de 50 y 25 km: LATAM
+lai_gaussian_latam <- results50_latam |>
+  dplyr::select(ID, LAI_Gaussian_50_sigma10, LAI_SD_50_sigma10, LAI_Median_50_sigma10, LAI_Gaussian_50_sigma3, LAI_SD_50_sigma3, LAI_Median_50_sigma3, LAI_Gaussian_50_sigma2, LAI_SD_50_sigma2, LAI_Median_50_sigma2, LAI_Min_50, LAI_Max_50) |>
+  left_join(results25_latam |> 
+              dplyr::select(ID, LAI_Gaussian_25_sigma10, LAI_SD_25_sigma10, LAI_Median_25_sigma10, LAI_Gaussian_25_sigma3, LAI_SD_25_sigma3, LAI_Median_25_sigma2, LAI_Gaussian_25_sigma2, LAI_SD_25_sigma2, LAI_Min_25, LAI_Max_25), by = "ID")
+```
+
+*chunk33*
+```{r}
+#Añadir identificadores y coordenadas a los resultados de LAI: LATAM
+
+id_lookup_latam <- pts_latam |>
+  mutate(ID = row_number()) |>
+  dplyr::select(ID, id_sample, latitude, longitude)
+
+lai_gaussian_latam <- lai_gaussian_latam |>
+  left_join(id_lookup_latam, by = "ID") |>
+  relocate(id_sample, latitude, longitude, .after = ID)
+```
+
+*chunk34*
+```{r}
+# Mapas de las métricas gaussianas de LAI: LATAM
+
+# Media gaussiana de LAI: radio 50 km, sigma = 5 km
+ggplot(data = lai_gaussian_latam) +
+  geom_point(aes(x = longitude, y = latitude, colour = LAI_Gaussian_50_sigma2)) +
+  scale_color_viridis_c(option = "plasma", name = "LAI\n(m² hoja m⁻² suelo)") +
+  tema_map
+
+# Desviación estándar gaussiana de LAI: radio 50 km, sigma = 5 km
+ggplot(data = lai_gaussian_latam) +
+  geom_point(aes(x = longitude, y = latitude, colour = LAI_SD_50_sigma2)) +
+  scale_color_viridis_c(option = "plasma", name = "SD del LAI\n(m² hoja m⁻² suelo)") +
+  tema_map
+```
+
+*35*
+```{r}
+saveRDS(lai_gaussian_latam, "Data/HiQ_LAI/Extraction/HiQ_LIA_gaussian_LATAM_25_50km.rds")
+```
+
+*36*
+```{r}
+modern_pollen_latam_gaussian <- modern_pollen_latam |>
+  left_join(lai_gaussian_latam |> dplyr::select(-ID, -latitude, -longitude), by = "id_sample")
+```
+
+*37*
+```{r}
+saveRDS(modern_pollen_latam_gaussian, "Data/HiQ_LAI/Extraction/HiQ_LAI_gaussian_LATAM_25_50km_modern_pollen.rds")
+```
+
+
+Ahora empezamos con EUROPA
+*38*
+```{r}
+# ============================================================
+# EUROPA — DEFINIR SIGMAS
+# ============================================================
+
+# Sigma para radio de 50 km
+#sigma50_100 <- 50000 / 100   # 500 m
+sigma50_10  <- 50000 / 10    # 5,000 m
+sigma50_3   <- 50000 / 3     # 16,666.67 m
+sigma50_2   <- 50000 / 2     # 25,000 m
+
+# Sigma para radio de 25 km
+#sigma25_100 <- 25000 / 100   # 250 m
+sigma25_10  <- 25000 / 10    # 2,500 m
+sigma25_3   <- 25000 / 3     # 8,333.33 m
+sigma25_2   <- 25000 / 2     # 12,500 m
+```
+
+*39*
+```{r}
+# Estadísticos gaussianos de LAI: Europa, radio de 50 km
+extract50_europa <- extract50_europa |> rename(LAI = LAI_mean_2001_2022)
+
+results50_europa <- extract50_europa |>
+  group_by(ID) |>
+  summarise(
+    # ========================================================================
+    # SCENARIO 1: radio = 50 km; sigma = 5 km
+    # ========================================================================
+    n_sigma10 = sum(distance_m <= sigma50_10, na.rm = TRUE),
+    n_na_sigma10 = sum(is.na(LAI) & distance_m <= sigma50_10, na.rm = TRUE),
+    LAI_Gaussian_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma50_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_10^2)), na.rm = TRUE)),
+    LAI_SD_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_10^2)) * (LAI - LAI_Gaussian_50_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_10^2)), na.rm = TRUE))),
+    LAI_Median_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_10^2)))),
+    # ========================================================================
+    # SCENARIO 2: radio = 50 km; sigma = 16,666.67 m
+    # ========================================================================
+    n_sigma3 = sum(distance_m <= sigma50_3, na.rm = TRUE),
+    n_na_sigma3 = sum(is.na(LAI) & distance_m <= sigma50_3, na.rm = TRUE),
+    LAI_Gaussian_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma50_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_3^2)), na.rm = TRUE)),
+    LAI_SD_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_3^2)) * (LAI - LAI_Gaussian_50_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_3^2)), na.rm = TRUE))),
+    LAI_Median_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_3^2)))),
+    # ========================================================================
+    # SCENARIO 3: radio = 50 km; sigma = 25 km
+    # ========================================================================
+    n_sigma2 = sum(distance_m <= sigma50_2, na.rm = TRUE),
+    n_na_sigma2 = sum(is.na(LAI) & distance_m <= sigma50_2, na.rm = TRUE),
+    LAI_Gaussian_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma50_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_2^2)), na.rm = TRUE)),
+    LAI_SD_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_2^2)) * (LAI - LAI_Gaussian_50_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_2^2)), na.rm = TRUE))),
+    LAI_Median_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma50_2^2)))),
+    # Rango de LAI entre píxeles válidos dentro del radio completo de 50 km
+    LAI_Min_50 = if_else(all(is.na(LAI)), NA_real_, min(LAI, na.rm = TRUE)),
+    LAI_Max_50 = if_else(all(is.na(LAI)), NA_real_, max(LAI, na.rm = TRUE)),
+    .groups = "drop"
+  )
+```
+
+
+
+*41*
+```{r}
+# ============================================================
+# EUROPE — SELECT PIXELS WITHIN 25 KM
+
+extract25_europa <- extract50_europa |> filter(distance_m <= 25000)
+```
+
+
+*42*
+```{r}
+# 42. Estadísticos gaussianos de LAI: Europa, radio de 25 km
+results25_europa <- extract25_europa |>
+  group_by(ID) |>
+  summarise(
+    # ========================================================================
+    # SCENARIO 1: radio = 25 km; sigma = 2.5 km
+    # ========================================================================
+    n_sigma10 = sum(distance_m <= sigma25_10, na.rm = TRUE),
+    n_na_sigma10 = sum(is.na(LAI) & distance_m <= sigma25_10, na.rm = TRUE),
+    LAI_Gaussian_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma25_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_10^2)), na.rm = TRUE)),
+    LAI_SD_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_10^2)) * (LAI - LAI_Gaussian_25_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_10^2)), na.rm = TRUE))),
+    LAI_Median_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_10^2)))),
+    # ========================================================================
+    # SCENARIO 2: radio = 25 km; sigma = 8,333.33 m
+    # ========================================================================
+    n_sigma3 = sum(distance_m <= sigma25_3, na.rm = TRUE),
+    n_na_sigma3 = sum(is.na(LAI) & distance_m <= sigma25_3, na.rm = TRUE),
+    LAI_Gaussian_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma25_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_3^2)), na.rm = TRUE)),
+    LAI_SD_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_3^2)) * (LAI - LAI_Gaussian_25_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_3^2)), na.rm = TRUE))),
+    LAI_Median_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_3^2)))),
+    # ========================================================================
+    # SCENARIO 3: radio = 25 km; sigma = 12.5 km
+    # ========================================================================
+    n_sigma2 = sum(distance_m <= sigma25_2, na.rm = TRUE),
+    n_na_sigma2 = sum(is.na(LAI) & distance_m <= sigma25_2, na.rm = TRUE),
+    LAI_Gaussian_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(LAI * exp(-(distance_m^2) / (2 * sigma25_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_2^2)), na.rm = TRUE)),
+    LAI_SD_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_2^2)) * (LAI - LAI_Gaussian_25_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_2^2)), na.rm = TRUE))),
+    LAI_Median_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = LAI[!is.na(LAI)], w = exp(-(distance_m[!is.na(LAI)]^2) / (2 * sigma25_2^2)))),
+    # Rango de LAI entre píxeles válidos dentro del radio completo de 25 km
+    LAI_Min_25 = if_else(all(is.na(LAI)), NA_real_, min(LAI, na.rm = TRUE)),
+    LAI_Max_25 = if_else(all(is.na(LAI)), NA_real_, max(LAI, na.rm = TRUE)),
+    .groups = "drop"
+  )
+```
+
+
+*43*
+```{r}
+# 43. Unir los resultados de LAI para radios de 50 y 25 km: Europa
+lai_gaussian_europa <- results50_europa |>
+  dplyr::select(ID, LAI_Gaussian_50_sigma10, LAI_SD_50_sigma10, LAI_Median_50_sigma10, LAI_Gaussian_50_sigma3, LAI_SD_50_sigma3, LAI_Median_50_sigma3, LAI_Gaussian_50_sigma2, LAI_SD_50_sigma2, LAI_Median_50_sigma2, LAI_Min_50, LAI_Max_50) |>
+  left_join(results25_europa |> dplyr::select(ID, LAI_Gaussian_25_sigma10, LAI_SD_25_sigma10, LAI_Median_25_sigma10, LAI_Gaussian_25_sigma3, LAI_SD_25_sigma3, LAI_Median_25_sigma3, LAI_Gaussian_25_sigma2, LAI_SD_25_sigma2, LAI_Median_25_sigma2, LAI_Min_25, LAI_Max_25), by = "ID")
+```
+
+
+
+*45*
+```{r}
+# Añadir identificadores y coordenadas a los resultados de LAI: Europa
+
+id_lookup_europa <- pts_europa |>
+  mutate(ID = row_number()) |>
+  dplyr::select(ID, id_sample, latitude, longitude)
+
+lai_gaussian_europa <- lai_gaussian_europa |>
+  left_join(id_lookup_europa, by = "ID") |>
+  relocate(id_sample, latitude, longitude, .after = ID)
+```
+
+*46*
+```{r}
+#  Añadir las métricas gaussianas de LAI a la base moderna de polen: Europa
+
+modern_pollen_europe_lai <- modern_pollen_europe |>
+  left_join(
+    lai_gaussian_europa |>
+      dplyr::select(-ID, -latitude, -longitude),
+    by = "id_sample")
+```
+
+*47*
+```{r}
+# Mapas de las métricas gaussianas de LAI: Europa
+
+# Media gaussiana de LAI: radio 50 km, sigma = 5 km
+ggplot(data = lai_gaussian_europa) +
+  geom_point(aes(x = longitude, y = latitude, colour = LAI_Gaussian_50_sigma10)) +
+  scale_color_viridis_c(option = "plasma", name = "LAI") +
+  tema_map
+
+# Desviación estándar gaussiana de LAI: radio 50 km, sigma = 5 km
+ggplot(data = lai_gaussian_europa) +
+  geom_point(aes(x = longitude, y = latitude, colour = LAI_SD_50_sigma10)) +
+  scale_color_viridis_c(option = "plasma", name = "SD LAI") +
+  tema_map
+```
+
+*48*
+```{r}
+saveRDS(
+  lai_gaussian_europa,
+  "Data/HiQ_LAI/Extraction/HiQ_LAI_gaussian_EUROPA_25_50km.rds"
+)
+
+saveRDS(
+  modern_pollen_europe_lai,
+  "Data/HiQ_LAI/Extraction/HiQ_LAI_gaussian_EUROPA_25_50km_modern_pollen.rds"
+)
+```
+
+
+```{r}
+modern_pollen_europe_gaussian |>
+  summarise(
+    cor_50_sigma10 = cor(
+      GPP_Gaussian_50_sigma10,
+      GPP_Median_50_sigma10,
+      use = "complete.obs"
+    ),
+
+    mae_50_sigma10 = mean(
+      abs(
+        GPP_Gaussian_50_sigma10 -
+          GPP_Median_50_sigma10
+      ),
+      na.rm = TRUE
+    )
+  )
+```
+
+
+```{r}
+ggplot(modern_pollen_europe_gaussian,
+  aes(x = GPP_Gaussian_50_sigma2, y = GPP_Median_50_sigma2)) +
+  geom_point(alpha = 0.3) +
+  geom_abline(intercept = 0, slope = 1, colour="firebrick1", linetype="dashed") +
+  labs(title = "relation bewteen GPP median and mean") +
+  coord_equal()
+```
+
+
+
+```{r}
+comparison_mean_median_europe <- tibble(
+  scenario = c("50_sigma10",
+    "50_sigma3",
+    "50_sigma2",
+    "25_sigma10",
+    "25_sigma3",
+    "25_sigma2"
+  ),
+
+  correlation = c(
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma10,
+        modern_pollen_europe_gaussian$Tree_Median_50_sigma10,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma3,
+        modern_pollen_europe_gaussian$Tree_Median_50_sigma3,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma2,
+        modern_pollen_europe_gaussian$Tree_Median_50_sigma2,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma10,
+        modern_pollen_europe_gaussian$Tree_Median_25_sigma10,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma3,
+        modern_pollen_europe_gaussian$Tree_Median_25_sigma3,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma2,
+        modern_pollen_europe_gaussian$Tree_Median_25_sigma2,
+        use = "complete.obs")
+  ),
+
+  MAE = c(
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma10 -
+               modern_pollen_europe_gaussian$Tree_Median_50_sigma10), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma3 -
+               modern_pollen_europe_gaussian$Tree_Median_50_sigma3), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma2 -
+               modern_pollen_europe_gaussian$Tree_Median_50_sigma2), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma10 -
+               modern_pollen_europe_gaussian$Tree_Median_25_sigma10), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma3 -
+               modern_pollen_europe_gaussian$Tree_Median_25_sigma3), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma2 -
+               modern_pollen_europe_gaussian$Tree_Median_25_sigma2), na.rm = TRUE)
+  ),
+
+  mean_difference = c(
+    mean(modern_pollen_europe_gaussian$Tree_Median_50_sigma10 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma10, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_50_sigma3 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma3, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_50_sigma2 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma2, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_25_sigma10 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma10, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_25_sigma3 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma3, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_25_sigma2 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma2, na.rm = TRUE)
+  )
+)
+
+comparison_mean_median_europe
+```
+
+```{r}
+modern_pollen_europe_gaussian |>
+  filter(
+    !is.na(Tree_Gaussian_50_sigma10),
+    !is.na(Tree_Median_50_sigma10)
+  ) |>
+  mutate(
+    difference = Tree_Median_50_sigma10 -
+      Tree_Gaussian_50_sigma10
+  ) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(difference),
+    MAE = mean(abs(difference)),
+
+    mean_difference_below_20 = mean(
+      difference[Tree_Gaussian_50_sigma10 < 20]
+    ),
+
+    MAE_below_20 = mean(
+      abs(difference[Tree_Gaussian_50_sigma10 < 20])
+    )
+  )
+```
+
+```{r}
+modern_pollen_europe_gaussian |>
+  filter(
+    !is.na(Tree_Gaussian_50_sigma2),
+    !is.na(Tree_Median_50_sigma2)
+  ) |>
+  mutate(
+    difference = Tree_Median_50_sigma2 -
+      Tree_Gaussian_50_sigma2
+  ) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(difference),
+    MAE = mean(abs(difference)),
+
+    mean_difference_below_20 = mean(
+      difference[Tree_Gaussian_50_sigma2 < 20]
+    ),
+
+    MAE_below_20 = mean(
+      abs(difference[Tree_Gaussian_50_sigma2 < 20])
+    )
+  )
+```
+
+
+```{r}
+comparison_bins_50_sigma2 <- modern_pollen_europe_gaussian |>
+  filter(
+    !is.na(Tree_Gaussian_50_sigma2),
+    !is.na(Tree_Median_50_sigma2)
+  ) |>
+  mutate(
+    difference = Tree_Median_50_sigma2 - Tree_Gaussian_50_sigma2,
+
+    tree_bin = cut(
+      Tree_Gaussian_50_sigma2,
+      breaks = c(0, 10, 20, 40, 60, 80, 100),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = c(
+        "0–10",
+        "10–20",
+        "20–40",
+        "40–60",
+        "60–80",
+        "80–100"
+      )
+    )
+  ) |>
+  group_by(tree_bin) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(
+      difference,
+      na.rm = TRUE
+    ),
+
+    median_difference = median(
+      difference,
+      na.rm = TRUE
+    ),
+
+    MAE = mean(
+      abs(difference),
+      na.rm = TRUE
+    ),
+
+    SD_difference = sd(
+      difference,
+      na.rm = TRUE
+    ),
+
+    .groups = "drop"
+  )
+
+comparison_bins_50_sigma2
+```
+
+
+```{r}
+ggplot(
+  comparison_bins_50_sigma2,
+  aes(
+    x = tree_bin,
+    y = mean_difference
+  )
+) +
+  geom_col() +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  labs(
+    x = "Gaussian mean tree cover",
+    y = "Weighted median - weighted mean",
+    title = "Difference between weighted median and mean",
+    subtitle = "Europe, 50-km radius, sigma = 25 km"
+  ) +
+  theme_classic()
+```
+
+
+```{r}
+ggplot(
+  comparison_bins_50_sigma2,
+  aes(
+    x = tree_bin,
+    y = MAE
+  )
+) +
+  geom_col() +
+  labs(
+    x = "Gaussian mean tree cover",
+    y = "Mean absolute difference",
+    title = "Magnitude of mean-median differences",
+    subtitle = "Europe, 50-km radius, sigma = 25 km"
+  ) +
+  theme_classic()
+```
+
+
+```{r}
+comparison_bins_all_europe <- bind_rows(
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "50_sigma10",
+      mean_value = Tree_Gaussian_50_sigma10,
+      median_value = Tree_Median_50_sigma10
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "50_sigma3",
+      mean_value = Tree_Gaussian_50_sigma3,
+      median_value = Tree_Median_50_sigma3
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "50_sigma2",
+      mean_value = Tree_Gaussian_50_sigma2,
+      median_value = Tree_Median_50_sigma2
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "25_sigma10",
+      mean_value = Tree_Gaussian_25_sigma10,
+      median_value = Tree_Median_25_sigma10
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "25_sigma3",
+      mean_value = Tree_Gaussian_25_sigma3,
+      median_value = Tree_Median_25_sigma3
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "25_sigma2",
+      mean_value = Tree_Gaussian_25_sigma2,
+      median_value = Tree_Median_25_sigma2
+    )
+
+) |>
+  filter(
+    !is.na(mean_value),
+    !is.na(median_value)
+  ) |>
+  mutate(
+    difference = median_value - mean_value,
+
+    tree_bin = cut(
+      mean_value,
+      breaks = c(0, 10, 20, 40, 60, 80, 100),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = c(
+        "0–10",
+        "10–20",
+        "20–40",
+        "40–60",
+        "60–80",
+        "80–100"
+      )
+    )
+  ) |>
+  group_by(
+    scenario,
+    tree_bin
+  ) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(
+      difference,
+      na.rm = TRUE
+    ),
+
+    median_difference = median(
+      difference,
+      na.rm = TRUE
+    ),
+
+    MAE = mean(
+      abs(difference),
+      na.rm = TRUE
+    ),
+
+    SD_difference = sd(
+      difference,
+      na.rm = TRUE
+    ),
+
+    .groups = "drop"
+  )
+
+comparison_bins_all_europe
+```
+
+```{r}
+ggplot(
+  comparison_bins_all_europe,
+  aes(
+    x = tree_bin,
+    y = mean_difference,
+    group = scenario,
+    colour = scenario
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  geom_line() +
+  geom_point() +
+  labs(
+    x = "Gaussian mean tree cover",
+    y = "Weighted median - weighted mean",
+    colour = "Scenario",
+    title = "Weighted median versus weighted mean across tree-cover classes",
+    subtitle = "Europe"
+  ) +
+  theme_classic()
+```
+
+```{r}
+mean_median_diff_europe <- modern_pollen_europe_gaussian |>
+  mutate(
+    difference = Tree_Median_50_sigma2 -
+      Tree_Gaussian_50_sigma2,
+    abs_difference = abs(difference)
+  ) |>
+  dplyr::select(
+    id_sample,
+    latitude,
+    longitude,
+    Tree_Gaussian_50_sigma2,
+    Tree_Median_50_sigma2,
+    Tree_SD_50_sigma2,
+    difference,
+    abs_difference
+  ) |>
+  arrange(desc(abs_difference))
+
+head(mean_median_diff_europe, 20)
+```
+
+Ahora haría una prueba directa: ¿a mayor SD, mayor diferencia absoluta entre media y mediana?
+```{r}
+cor(
+  mean_median_diff_europe$Tree_SD_50_sigma2,
+  mean_median_diff_europe$abs_difference,
+  use = "complete.obs",
+  method = "spearman"
+)
+```
+
+Usaría primero Spearman porque no necesitamos asumir una relación lineal perfecta.
+
+Y el gráfico:
+```{r}
+ggplot(
+  mean_median_diff_europe,
+  aes(
+    x = Tree_SD_50_sigma2,
+    y = abs_difference
+  )
+) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(
+    method = "lm",
+    se = FALSE
+  ) +
+  labs(
+    x = "Gaussian-weighted SD of tree cover",
+    y = "|Weighted median - weighted mean|",
+    title = "Mean–median divergence increases with landscape heterogeneity",
+    subtitle = "Europe, 50-km radius, sigma = 25 km"
+  ) +
+  theme_classic()
+```
+
+```{r}
+comparison_by_sd_europe <- mean_median_diff_europe |>
+  filter(
+    !is.na(Tree_SD_50_sigma2),
+    !is.na(abs_difference)
+  ) |>
+  mutate(
+    sd_bin = cut(
+      Tree_SD_50_sigma2,
+      breaks = c(0, 5, 10, 15, 20, 25, Inf),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = c(
+        "0–5",
+        "5–10",
+        "10–15",
+        "15–20",
+        "20–25",
+        "25+"
+      )
+    )
+  ) |>
+  group_by(sd_bin) |>
+  summarise(
+    n = n(),
+    mean_abs_difference = mean(abs_difference),
+    median_abs_difference = median(abs_difference),
+    .groups = "drop"
+  )
+
+comparison_by_sd_europe
+```
+

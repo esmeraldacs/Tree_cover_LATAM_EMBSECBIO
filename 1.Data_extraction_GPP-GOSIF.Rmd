@@ -1,0 +1,1502 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-06-24"
+---
+
+Este es el codigo para transformar de clasesPoulter schemme
+*chunk1*
+```{r}
+library(terra)
+library(tidyverse)
+library(tidyterra)
+library(sf)
+library(matrixStats)
+```
+
+
+Condigo para dos regiones simulataneas
+*chunk2*
+```{r}
+# Load and prepare land polygon for South America
+land_polyg_latam <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-118, -33, -55, 32)) |>
+  sf::st_as_sf() #|>
+ # sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_latam)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_eur <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-20, 62, 29, 75)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf() #|>
+  #sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_eur)
+
+# Load and prepare land polygon for Europe
+land_polyg_afr <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-22, 60, -40, 40)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf() #|>
+  #sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_afr)
+```
+
+*chunk3*
+```{r}
+tema_map <- theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.28,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=7.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 7.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.05,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.08,0.45))
+```
+
+
+LATAM
+*chunk4*
+```{r}
+# Load the data frames from the RDS file
+data_latam <- readRDS("Data/Input/updated_modern_dataset_climate_hill.rds") |>
+  select(-c(mapr, mi, gdd0, mat, mtco, mtwa, alpha, age_bp))
+
+data_latam
+
+#Remover taxa con valores de cero
+modern_pollen_latam <- data_latam |>
+  pivot_longer(cols = -c(id_sample:entity_type),names_to = "taxa") |>
+  filter(value > 0)
+
+#Remover taxa que ocurren en menos del 1 % de las muestas
+n_total <- n_distinct(modern_pollen_latam$id_sample)
+
+aux1 <- modern_pollen_latam |>
+  group_by(taxa) |>
+  mutate(n_samples = n_distinct(id_sample)) |>
+  ungroup() |>
+  filter(n_samples >= 0.002 * n_total) |>
+  select(-n_samples)
+
+#Funcion para manejar casos donde todos en el grupo son NAs
+mode_na <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) {
+    return(NA_character_)
+  }
+  names(sort(table(x), decreasing = TRUE))[1]
+}
+
+modern_pollen_latam <- aux1 |>
+  group_by(id_sample) |>
+  mutate(value = value / sum(value)) |>
+  ungroup() |>
+  arrange(taxa) |>
+  pivot_wider(
+    id_cols = c(id_sample:entity_type),
+    names_from = "taxa",
+    values_fill = 0
+  ) |>
+  select(-c(id_sample, entity_name)) |>
+  group_by(latitude, longitude) |>
+  summarise(
+    across(
+      where(is.numeric),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    site_type = mode_na(site_type),
+    entity_type = mode_na(entity_type),
+    .groups = "drop"
+  ) |>
+  mutate(id_sample = paste0("ID_", row_number())) |>
+  select(id_sample, everything())
+
+
+modern_pollen_latam <- modern_pollen_latam |>
+  select(id_sample:elevation, site_type, entity_type, everything()) |>
+  select(-site_type, -entity_type)
+  
+modern_pollen_latam
+```
+
+*chunk5*
+```{r}
+# Load the data frames from the RDS file
+data_europe <- read.csv("Data/Input/Modern_Pollen_TrIan_from_climate_recon_EMBSECBIO.csv") |>
+  select(-c(X, gdd, MI, Tmin, alpha)) |>
+  rename(latitude = Lat, 
+         longitude = Long, 
+         elevation = Elv,
+         entity_name = Entity.name,
+         hill_n2 = Hill_N2) |>
+  mutate(id_sample = row_number()) |>
+  select(id_sample, everything())
+
+
+#Remover taxa con valores de cero
+modern_pollen_europe <- data_europe |>
+  pivot_longer(cols = -c(id_sample:hill_n2),names_to = "taxa") |>
+  filter(value > 0)
+
+#Remover taxa que ocurren en menos del 1 % de las muestas
+n_total <- n_distinct(modern_pollen_europe$id_sample)
+
+aux2 <- modern_pollen_europe |>
+  group_by(taxa) |>
+  mutate(n_samples = n_distinct(id_sample)) |>
+  ungroup() |>
+  filter(n_samples >= 0.002 * n_total) |>
+  select(-n_samples)
+
+
+modern_pollen_europe <- aux2 |>
+  group_by(id_sample) |>
+  mutate(value = value / sum(value)) |>
+  ungroup() |>
+  arrange(taxa) |>
+  pivot_wider(id_cols = c(id_sample:hill_n2), 
+              names_from = "taxa", values_fill = 0) |>
+  select(-c(id_sample, entity_name)) |>
+  group_by(latitude, longitude) |>
+  summarise(across(where(is.numeric),~ mean(.x, na.rm = TRUE)),.groups = "drop") |>
+  mutate(id_sample = paste0("ID_", row_number())) |>
+  select(id_sample, everything())
+
+  
+modern_pollen_europe
+```
+
+
+
+
+*chunk6*
+```{r}
+saveRDS(modern_pollen_latam, "Data/Input/modern_pollen_latam.rds")
+
+saveRDS(modern_pollen_europe, "Data/Input/modern_pollen_europe.rds")
+```
+
+*chunk7*
+```{r}
+modern_pollen_latam <- readRDS("Data/Input/modern_pollen_latam.rds")
+
+modern_pollen_europe <- readRDS("Data/Input/modern_pollen_europe.rds") |>
+  filter(longitude <= 62 & latitude <= 75)
+```
+
+*chunk8*
+```{r}
+ggplot() +
+  geom_sf(data = land_polyg_eur) +
+  geom_point(data = modern_pollen_europe, aes(x=longitude, y=latitude)) 
+```
+
+
+*chunk9*
+
+```{r}
+# ============================================================
+# 1. LOCALIZAR ARCHIVOS
+# ============================================================
+gpp_dir <- "C:/Datasets_GPP/GOSIF-GPP_v2/Annual/Mean/"
+gpp_files <- list.files(gpp_dir, pattern = "GOSIF_GPP_[0-9]{4}_Mean\\.tif$", full.names = TRUE, recursive = TRUE)
+years <- as.numeric(sub(".*GOSIF_GPP_([0-9]{4})_Mean\\.tif$", "\\1", gpp_files))
+ord <- order(years)
+gpp_files <- gpp_files[ord]
+years <- years[ord]
+
+# ============================================================
+# 2. LEER INDIVIDUALMENTE
+# ============================================================
+gpp_list <- lapply(gpp_files, rast)
+
+# ============================================================
+# 3. ELIMINAR FILL VALUES
+# IMPORTANTE: hacerlo ANTES del resample y ANTES de * 0.1
+# 65534 = snow/ice, 65535 = water
+# ============================================================
+gpp_list <- lapply(gpp_list, function(x) { ifel(x >= 65534, NA, x) })
+
+# ============================================================
+# 4. COMPROBAR GEOMETRÍA
+# ============================================================
+template <- gpp_list[[1]]
+same_geom <- sapply(gpp_list, function(x) { compareGeom(template, x, stopOnError = FALSE) })
+data.frame(year = years, same_geometry = same_geom)
+
+# ============================================================
+# 5. REALINEAR AÑOS DIFERENTES
+# En tus datos: 2021 y 2022
+# ============================================================
+idx_problem <- which(!same_geom)
+years[idx_problem]
+for (i in idx_problem) {
+  gpp_list[[i]] <- resample(gpp_list[[i]], template, method = "bilinear")
+}
+
+# ============================================================
+# 6. COMPROBAR QUE TODO COINCIDE
+# ============================================================
+same_geom_after <- sapply(gpp_list, function(x) { compareGeom(template, x, stopOnError = FALSE) })
+stopifnot(all(same_geom_after))
+
+# ============================================================
+# 7. UNIR LOS 24 AÑOS
+# ============================================================
+gpp <- rast(gpp_list)
+names(gpp) <- paste0("GPP_", years)
+
+# ============================================================
+# 8. SCALE FACTOR
+# GPP anual: stored value × 0.1, unidades finales: g C m-2 yr-1
+# ============================================================
+gpp <- gpp * 0.1
+
+# ============================================================
+# 9. COMPROBAR VALORES
+# ============================================================
+global(gpp, fun = c("min", "max", "mean"), na.rm = TRUE)
+
+# ============================================================
+# 10. MEDIA 2001–2024
+# ============================================================
+gpp_mean_2001_2024 <- mean(gpp, na.rm = TRUE)
+names(gpp_mean_2001_2024) <- "GPP"
+plot(gpp_mean_2001_2024)
+global(gpp_mean_2001_2024, c("min", "max", "mean"), na.rm = TRUE)
+```
+
+
+
+
+
+##########
+##########
+Este solo se ejecuta una vez
+*chunk10*
+```{r}
+# 2. CRS métrico (para medir distancias) y resolución común
+crs_metric <- "EPSG:6933"
+
+gpp_metric <- project(gpp_mean_2001_2024, crs_metric, method = "bilinear")
+# Comprobar
+res(gpp_metric)
+crs(gpp_metric)
+
+
+#Convertir poligonos a terra
+land_latam_vect <- vect(land_polyg_latam)
+land_eur_vect   <- vect(land_polyg_eur)
+land_afr_vect   <- vect(land_polyg_afr)
+
+#Después transformamos los polígonos. land_polyg_latam y land_polyg_eur están en WGS84. No hay problema: simplemente los pasamos al mismo CRS métrico:
+land_latam_metric <- project(land_latam_vect, crs_metric)
+land_eur_metric <- project(land_eur_vect, crs_metric)
+land_afr_metric <- project(land_afr_vect, crs_metric)
+
+#Crop + mask
+#LATAM
+r_latam_crop <- gpp_metric |>
+  crop(land_latam_metric) |>
+  mask(land_latam_metric)
+
+#EUROPE
+r_europa_crop <- gpp_metric |>
+  crop(land_eur_metric) |>
+  mask(land_eur_metric)
+
+#AFRICA
+r_africa_crop <- gpp_metric |>
+  crop(land_afr_metric) |>
+  mask(land_afr_metric)
+
+res(r_latam_crop)
+res(r_europa_crop)
+res(r_africa_crop)
+
+plot(r_latam_crop, main = "Tree cover - Latin America")
+plot(land_latam_metric, add = TRUE)
+
+plot(r_europa_crop, main = "Tree cover - Europe")
+plot(land_eur_metric, add = TRUE)
+
+plot(r_africa_crop, main = "Tree cover - Africa")
+plot(land_afr_metric, add = TRUE)
+
+```
+
+*chunk11*
+```{r}
+# 4. Guardar
+writeRaster(r_latam_crop, "Data/GPP-GEOSIF/rasters/gpp_gosif_LATAM_EPSG6933_land.tif", overwrite = TRUE)
+
+writeRaster(r_europa_crop, "Data/GPP-GEOSIF/rasters/gpp_gosif_EUROPA_EPSG6933_land.tif", overwrite = TRUE)
+
+writeRaster(r_africa_crop, "Data/GPP-GEOSIF/rasters/gpp_gosif_AFRICA_EPSG6933_land.tif", overwrite = TRUE)
+
+```
+
+*chunk12*
+```{r}
+# Abrir los rasters
+r_latam  <- rast("Data/GPP-GEOSIF/rasters/gpp_gosif_LATAM_EPSG6933_land.tif")
+r_europa <- rast("Data/GPP-GEOSIF/rasters/gpp_gosif_EUROPA_EPSG6933_land.tif")
+r_africa <- rast("Data/GPP-GEOSIF/rasters/gpp_gosif_AFRICA_EPSG6933_land.tif")
+
+
+plot(r_latam, main = "Tree cover - Latin America")
+
+plot(r_europa, main = "Tree cover - Europe")
+
+plot(r_africa, main = "Tree cover - Africa")
+```
+
+Plotting of the map
+*chunk13*
+```{r}
+# ============================================================
+# 2. Reducir resolución SOLO para plotting
+#    factor = 5 --> cada 5x5 píxeles se convierte en 1
+# ============================================================
+agg_factor <- 3
+
+r_latam_plot  <- aggregate(r_latam,  fact = agg_factor, fun = mean, na.rm = TRUE)
+r_europa_plot <- aggregate(r_europa, fact = agg_factor, fun = mean, na.rm = TRUE)
+r_africa_plot <- aggregate(r_africa, fact = agg_factor, fun = mean, na.rm = TRUE)
+
+
+r_latam_plot  <- project(r_latam_plot, "EPSG:4326")
+r_europa_plot <- project(r_europa_plot, "EPSG:4326")
+r_africa_plot <- project(r_africa_plot, "EPSG:4326")
+# 3. Convertir a data.frame para plotting
+
+df_latam <- as.data.frame(r_latam_plot, xy = TRUE, na.rm = TRUE)
+df_europa <- as.data.frame(r_europa_plot, xy = TRUE, na.rm = TRUE)
+df_africa <- as.data.frame(r_africa_plot, xy = TRUE, na.rm = TRUE)
+
+
+# Renombrar la columna del raster
+names(df_latam)[3]  <- "gpp"
+names(df_europa)[3] <- "gpp"
+names(df_africa)[3] <- "gpp"
+
+saveRDS(df_africa, "C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/Potential tree cover/df_africa_GPP-GOSIF_down_resol.rds")
+
+#plot(r_latam_plot, main = "Tree cover - Latin America (reduced resolution)")
+#plot(r_latam, main = "Tree cover - Latin America")
+#plot(r_europa_plot, main = "Tree cover - Europe (reduced resolution)")
+#plot(r_europa, main = "Tree cover - Europe")
+
+map_latam <- ggplot() +
+  geom_sf(data=land_polyg_latam) +
+  geom_tile(data = df_latam, aes(x=x, y=y, fill=gpp)) +
+  rcartocolor::scale_fill_carto_c(palette = "Tropic",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, fill = "GPP", subtitle = expression(GPP~(g~C~m^{-2}~yr^{-1}))) +
+  tema_map
+  
+  
+map_latam  
+
+map_europe <- ggplot() +
+  geom_sf(data=land_polyg_eur) +
+  geom_tile(data = df_europa, aes(x=x, y=y, fill=gpp)) +
+  rcartocolor::scale_fill_carto_c(palette = "Tropic",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, fill = "GPP", subtitle = expression(GPP~(g~C~m^{-2}~yr^{-1}))) +
+  tema_map
+  
+  
+map_europe 
+
+map_africa <- ggplot() +
+  geom_sf(data=land_polyg_afr) +
+  geom_tile(data = df_africa, aes(x=x, y=y, fill=gpp)) +
+  rcartocolor::scale_fill_carto_c(palette = "Tropic",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, fill = "GPP", subtitle = expression(GPP~(g~C~m^{-2}~yr^{-1}))) +
+  tema_map
+  
+  
+map_africa
+```
+*chunk14*
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/GPP_GOSIF/GPP_GOSIF_map_bin.JPG", plot = map_latam,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+*chunk15*
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/GPP_GOSIF/GPP_GOSIF_map_bin.JPG", plot = map_europe,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+1. Preparar únicamente id_sample, latitud y longitud
+*chunk16*
+```{r}
+# Puntos LATAM
+pts_latam <- modern_pollen_latam |> dplyr::select(id_sample, latitude, longitude)
+# Puntos Europa
+pts_europa <- modern_pollen_europe |> dplyr::select(id_sample, latitude, longitude)
+
+nrow(pts_latam)
+nrow(pts_europa)
+```
+
+2. Trabajar en un CRS métrico
+
+Como los radios son de 25 y 50 km, no quiero calcular distancias directamente en WGS84.
+Para empezar, podemos utilizar una proyección métrica global. Una opción práctica para este análisis es EPSG:6933, que trabaja en metros y es apropiada para análisis espaciales globales.
+*chunk17*
+```{r}
+pts_latam_vect <- vect(pts_latam, geom = c("longitude", "latitude"), crs = "EPSG:4326")
+pts_europa_vect <- vect(pts_europa, geom = c("longitude", "latitude"), crs = "EPSG:4326")
+
+crs_metric <- "EPSG:6933"
+pts_latam_metric <- project(pts_latam_vect, crs_metric)
+pts_europa_metric <- project(pts_europa_vect, crs_metric)
+
+```
+
+3. Extraer los píxeles dentro de 50 km
+Aquí está una parte importante del diseño.
+Vamos a crear buffers de 50,000 m alrededor de cada punto:
+Y extraemos los píxeles del raster.
+*chunk18*
+```{r}
+buffer50_latam <- buffer(pts_latam_metric, width = 50000)
+buffer50_europa <- buffer(pts_europa_metric, width = 50000)
+
+
+extract50_latam <- terra::extract(r_latam, buffer50_latam, cells = TRUE, xy = TRUE)
+extract50_europa <- terra::extract(r_europa, buffer50_europa, cells = TRUE, xy = TRUE)
+
+```
+
+
+4. Añadir las coordenadas de cada punto
+Necesitamos saber la distancia entre el centro de cada píxel y el punto correspondiente.
+*chunk19*
+```{r}
+#Para LATAM:
+coords_latam <- crds(pts_latam_metric)
+
+coords_latam <- data.frame(point_id = seq_len(nrow(pts_latam_metric)),
+                           point_x = coords_latam[, 1],
+                           point_y = coords_latam[, 2])
+
+#Para Europa
+coords_europa <- crds(pts_europa_metric)
+
+coords_europa <- data.frame(point_id = seq_len(nrow(pts_europa_metric)),
+                            point_x = coords_europa[, 1],
+                            point_y = coords_europa[, 2])
+
+
+#Ahora podemos añadir esas coordenadas a las extracciones:
+extract50_latam <- extract50_latam |> left_join(coords_latam, by = c("ID" = "point_id"))
+extract50_europa <- extract50_europa |> left_join(coords_europa, by = c("ID" = "point_id"))
+```
+
+
+5. Calcular distancia de cada píxel al punto
+Como estamos en metros:
+*chunk20*
+```{r}
+extract50_latam <- extract50_latam |> mutate(distance_m = sqrt((x - point_x)^2 + (y - point_y)^2))
+
+extract50_europa <- extract50_europa |> mutate(distance_m = sqrt((x - point_x)^2 + (y - point_y)^2))
+```
+
+
+
+
+*chunk21*
+```{r}
+#Test
+#Como los buffers son de 50 km, los máximos deberían quedar aproximadamente en 50,000 m o muy cerca. Puede haber una pequeña diferencia por el tamaño de los píxeles y porque usamos las coordenadas del centro de cada celda.
+summary(extract50_latam$distance_m)
+summary(extract50_europa$distance_m)
+
+max(extract50_latam$distance_m, na.rm = TRUE)
+max(extract50_europa$distance_m, na.rm = TRUE)
+```
+
+
+
+
+Ahora viene la parte de calcular los seis escenarios gaussianos. Como extract50_* son enormes, yo lo haría por región y por radio, evitando crear tres columnas permanentes de pesos.
+Empezaría con LATAM y, cuando comprobemos que funciona, hacemos exactamente lo mismo para Europa.
+Primero define los sigmas:
+*chunk26*
+```{r}
+# Sigma para radio de 50 km
+#sigma50_100 <- 50000 / 100   # 500 m
+sigma50_10  <- 50000 / 10    # 5,000 m
+sigma50_3   <- 50000 / 3     # 16,666.67 m
+sigma50_2   <- 50000 / 2     # 25,000 m
+
+# Sigma para radio de 25 km
+#sigma25_100 <- 25000 / 100   # 250 m
+sigma25_10  <- 25000 / 10    # 2,500 m
+sigma25_3   <- 25000 / 3     # 8,333.33 m
+sigma25_2   <- 25000 / 2     # 12,500 m
+```
+
+
+1. LATAM — escenarios de 50 km
+Aquí usamos todos los píxeles de extract50_latam. La regla de NA será exactamente la que acordamos: si más de la mitad de los píxeles del buffer son NA, el resultado será NA.
+
+GAUSSIAN-WEIGHTED TREE COVER WITHIN A 50-km RADIUS — LATIN AMERICA
+
+Objective:
+For each modern pollen sample (ID), calculate the mean tree cover within a circular 50-km radius, weighting each raster pixel according to its distance from the sampling point using a Gaussian function.
+
+Pixels located close to the sampling point therefore contribute more strongly to the estimated tree-cover value than pixels located farther away.
+Three Gaussian weighting scenarios are calculated using the SAME 50-km extraction radius but different sigma (σ) values:
+
+* sigma = radius / 100 = 500 m
+* sigma = radius / 10 = 5,000 m
+* sigma = radius / 3 = 16,666.67 m
+
+A smaller sigma produces a much stronger concentration of weight around the sampling point, whereas a larger sigma allows more distant pixels to contribute substantially to the final estimate.
+
+Gaussian weighting function:
+w = exp( - d² / (2 × σ²) )
+
+where:
+w = weight assigned to a raster pixel
+d = distance between the centre of the raster pixel and the pollen sample
+σ = standard deviation controlling the spatial decay of the Gaussian kernel
+
+The Gaussian-weighted tree-cover estimate is:
+
+TreeCover_weighted = Σ(tree_cover_i × w_i) / Σ(w_i)
+
+Importantly, the denominator contains ONLY the weights associated with non-NA tree-cover pixels. Therefore, missing raster cells do not contribute either to the numerator or denominator.
+
+Missing-data criterion:
+# IMPORTANT:
+     The NA criterion is evaluated within sigma, but the Gaussian weighted
+     mean itself still uses all available pixels within the complete
+     50-km extraction radius
+--------------------------------------------------------
+La mediana ponderada te dice el valor “central” de tree cover después de dar más importancia a los píxeles cercanos. El SD ponderado te dice cuánto varían los valores alrededor de esa media ponderada.
+
+Además, ambos están en las mismas unidades que tree cover. Si tree cover está en %, entonces mediana y SD están en puntos porcentuales.
+
+Mean weighted   = 70
+Median weighted = 72
+SD weighted     = 4
+
+indicates a landscape concentrated around 70–72%, and therefore relatively homogeneous.
+
+In contrast:
+Mean weighted   = 70
+Median weighted = 85
+SD weighted     = 25
+
+suggests a much more heterogeneous and possibly asymmetric landscape: many pixels have high cover values, but others have low values that pull the mean downward.
+
+In fact, the combination of **mean + median + SD** is quite informative:
+
+* `Mean ≈ Median` + low SD → relatively homogeneous landscape.
+* `Mean ≈ Median` + high SD → substantial heterogeneity, but relatively symmetric.
+* `Mean < Median` → low/extreme values are pulling the mean downward.
+* `Mean > Median` → some high values are pulling the mean upward.
+* large difference between mean and median + high SD → highly heterogeneous and asymmetric distribution.
+
+What I **would not** do is directly interpret something like `SD = 15` versus `Median = 70` as a comparison of magnitude between the two metrics. The median represents **cover level**, whereas the SD represents **dispersion**.
+
+
+*chunk27*
+```{r}
+results50_latam <- extract50_latam |>
+  group_by(ID) |>
+  summarise(
+    # ========================================================================
+    # SCENARIO 1
+    # Radius = 50 km
+    # sigma = 50 km / 10 = 5,000 m
+    #
+    # Missing-data rule:
+    # Evaluate data availability only within one sigma (5 km).
+    # If more than 50% of the pixels located within 5 km are NA,
+    # the final estimate is assigned NA.
+    #
+    # The Gaussian-weighted statistics themselves use all valid pixels
+    # within the complete 50-km extraction radius.
+    # ========================================================================
+    n_sigma10 = sum(distance_m <= sigma50_10),
+    n_na_sigma10 = sum(is.na(GPP) & distance_m <= sigma50_10),
+    GPP_Gaussian_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma50_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_10^2)))),
+    GPP_SD_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_10^2)) * (GPP - GPP_Gaussian_50_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_10^2))))),
+    GPP_Median_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_10^2)))),
+    # ========================================================================
+    # SCENARIO 2
+    # Radius = 50 km
+    # sigma = 50 km / 3 = 16,666.67 m
+    # ========================================================================
+    n_sigma3 = sum(distance_m <= sigma50_3),
+    n_na_sigma3 = sum(is.na(GPP) & distance_m <= sigma50_3),
+    GPP_Gaussian_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma50_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_3^2)))),
+    GPP_SD_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_3^2)) * (GPP - GPP_Gaussian_50_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_3^2))))),
+    GPP_Median_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_3^2)))),
+    # ========================================================================
+    # SCENARIO 3
+    # Radius = 50 km
+    # sigma = 50 km / 2 = 25,000 m
+    # ========================================================================
+    n_sigma2 = sum(distance_m <= sigma50_2),
+    n_na_sigma2 = sum(is.na(GPP) & distance_m <= sigma50_2),
+    GPP_Gaussian_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma50_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_2^2)))),
+    GPP_SD_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_2^2)) * (GPP - GPP_Gaussian_50_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_2^2))))),
+    GPP_Median_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_2^2)))),
+    # ========================================================================
+    # MINIMUM AND MAXIMUM WITHIN THE COMPLETE 50-km BUFFER
+    # These statistics are not Gaussian weighted.
+    # They describe the full range of observed GPP values
+    # among valid raster pixels within 50 km.
+    # ========================================================================
+    GPP_Min_50 = if_else(all(is.na(GPP)), NA_real_, min(GPP, na.rm = TRUE)),
+    GPP_Max_50 = if_else(all(is.na(GPP)), NA_real_, max(GPP, na.rm = TRUE)),
+    .groups = "drop"
+  )
+```
+
+Una interpretación útil para documentar tus escenarios es recordar qué ocurre a una distancia igual a σ. En una gaussiana:
+w = e⁻¹ᐟ² ≈ 0.607
+
+Así, para el radio de 50 km:
+| Distancia | σ = 0.5 km | σ = 5 km | σ = 16.67 km |
+| --------- | ---------: | -------: | -----------: |
+| 0 km      |          1 |        1 |            1 |
+| 0.5 km    |      0.607 |    0.995 |           ~1 |
+| 5 km      |         ~0 |    0.607 |        0.956 |
+| 16.7 km   |         ~0 |    0.004 |        0.607 |
+| 50 km     |         ~0 |       ~0 |        0.011 |
+
+Esto deja muy clara la diferencia conceptual: aunque los tres escenarios usan un radio máximo de 50 km, sigma100 es prácticamente una estimación muy local, sigma10 integra principalmente unos pocos kilómetros alrededor del sitio, y sigma3 incorpora información de una porción mucho mayor del paisaje.
+
+
+#Ahora seguimos con los escenarios  de 25 km
+*chunk29*
+```{r}
+extract25_latam <- extract50_latam |> filter(distance_m <= 25000)
+
+#verificacion de que el filtro quedo bien
+#Debería:
+#máximo = 25,000 m
+#mediana de distancia ≈ 17.68 km
+#media ≈ 16.67 km
+#~31,416 píxeles por punto
+#Ese número cuadra casi perfecto con el área teórica de un círculo de 25 km a 250 m de resolución:
+#250² × π × 25,000² ≈ 31,416
+
+
+#summary(extract25_latam$distance_m)
+#max(extract25_latam$distance_m,na.rm = TRUE)
+
+#extract25_latam |> count(ID) |> summary()
+```
+
+
+*chunk30*
+```{r}
+results25_latam <- extract25_latam |>
+  group_by(ID) |>
+  summarise(
+    # ========================================================================
+    # SCENARIO 1
+    # Radius = 25 km
+    # sigma = 25 km / 10 = 2,500 m
+    #
+    # Missing-data rule:
+    # Evaluate data availability only within one sigma (2.5 km).
+    # If more than 50% of the pixels located within 2.5 km are NA,
+    # the final estimate is assigned NA.
+    #
+    # The Gaussian-weighted statistics themselves use all valid pixels
+    # within the complete 25-km extraction radius.
+    # ========================================================================
+    n_sigma10 = sum(distance_m <= sigma25_10),
+    n_na_sigma10 = sum(is.na(GPP) & distance_m <= sigma25_10),
+    GPP_Gaussian_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma25_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_10^2)))),
+    GPP_SD_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_10^2)) * (GPP - GPP_Gaussian_25_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_10^2))))),
+    GPP_Median_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_10^2)))),
+    # ========================================================================
+    # SCENARIO 2
+    # Radius = 25 km
+    # sigma = 25 km / 3 = 8,333.33 m
+    # ========================================================================
+    n_sigma3 = sum(distance_m <= sigma25_3),
+    n_na_sigma3 = sum(is.na(GPP) & distance_m <= sigma25_3),
+    GPP_Gaussian_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma25_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_3^2)))),
+    GPP_SD_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_3^2)) * (GPP - GPP_Gaussian_25_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_3^2))))),
+    GPP_Median_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_3^2)))),
+    # ========================================================================
+    # SCENARIO 3
+    # Radius = 25 km
+    # sigma = 25 km / 2 = 12,500 m
+    # ========================================================================
+    n_sigma2 = sum(distance_m <= sigma25_2),
+    n_na_sigma2 = sum(is.na(GPP) & distance_m <= sigma25_2),
+    GPP_Gaussian_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma25_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_2^2)))),
+    GPP_SD_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_2^2)) * (GPP - GPP_Gaussian_25_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_2^2))))),
+    GPP_Median_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_2^2)))),
+    # ========================================================================
+    # MINIMUM AND MAXIMUM WITHIN THE COMPLETE 25-km BUFFER
+    # These are not Gaussian weighted.
+    # They describe the full range of GPP values among valid pixels
+    # within the complete 25-km radius.
+    # ========================================================================
+    GPP_Min_25 = if_else(all(is.na(GPP)), NA_real_, min(GPP, na.rm = TRUE)),
+    GPP_Max_25 = if_else(all(is.na(GPP)), NA_real_, max(GPP, na.rm = TRUE)),
+    .groups = "drop"
+  )
+```
+
+
+
+
+*chunk32*
+```{r}
+gpp_gaussian_latam <- results50_latam |>
+  dplyr::select(ID, GPP_Gaussian_50_sigma10, GPP_SD_50_sigma10, GPP_Median_50_sigma10, GPP_Gaussian_50_sigma3, GPP_SD_50_sigma3, GPP_Median_50_sigma3, GPP_Gaussian_50_sigma2, GPP_SD_50_sigma2, GPP_Median_50_sigma2, GPP_Min_50, GPP_Max_50) |>
+  left_join(results25_latam |> dplyr::select(ID, GPP_Gaussian_25_sigma10, GPP_SD_25_sigma10, GPP_Median_25_sigma10, GPP_Gaussian_25_sigma3, GPP_SD_25_sigma3, GPP_Median_25_sigma3, GPP_Gaussian_25_sigma2, GPP_SD_25_sigma2, GPP_Median_25_sigma2, GPP_Min_25, GPP_Max_25), by = "ID")
+```
+
+*chunk33*
+```{r}
+id_lookup_latam <- pts_latam |>
+  mutate(ID = row_number()) |>
+  dplyr::select(ID, id_sample, latitude, longitude)
+
+gpp_gaussian_latam <- gpp_gaussian_latam |>
+  left_join(id_lookup_latam, by = "ID") |>
+  relocate(id_sample, latitude, longitude, .after = ID)
+```
+
+*chunk34*
+```{r}
+# Gaussian-weighted mean GPP
+ggplot(data = gpp_gaussian_latam) +
+  geom_point(aes(x = longitude, y = latitude, colour = GPP_Gaussian_50_sigma10)) +
+  scale_color_viridis_c(option = "plasma", name = expression(GPP~(g~C~m^{-2}~yr^{-1})))
+
+# Gaussian-weighted SD of GPP
+ggplot(data = gpp_gaussian_latam) +
+  geom_point(aes(x = longitude, y = latitude, colour = GPP_SD_50_sigma10)) +
+  scale_color_viridis_c(option = "plasma", name = expression(GPP~SD~(g~C~m^{-2}~yr^{-1})))
+```
+
+*35*
+```{r}
+saveRDS(gpp_gaussian_latam, "Data/GPP-GEOSIF/Extraction/GPP_gaussian_LATAM_25_50km.rds")
+```
+
+*36*
+```{r}
+modern_pollen_latam_gaussian <- modern_pollen_latam |>
+  left_join(gpp_gaussian_latam |> dplyr::select(-ID, -latitude, -longitude), by = "id_sample")
+```
+
+*37*
+```{r}
+saveRDS(modern_pollen_latam_gaussian, "Data/GPP-GEOSIF/Extraction/GPP_gaussian_LATAM_25_50km_modern_pollen.rds")
+```
+
+
+Ahora empezamos con EUROPA
+*38*
+```{r}
+# ============================================================
+# EUROPA — DEFINIR SIGMAS
+# ============================================================
+
+# Sigma para radio de 50 km
+#sigma50_100 <- 50000 / 100   # 500 m
+sigma50_10  <- 50000 / 10    # 5,000 m
+sigma50_3   <- 50000 / 3     # 16,666.67 m
+sigma50_2   <- 50000 / 2     # 25,000 m
+
+# Sigma para radio de 25 km
+#sigma25_100 <- 25000 / 100   # 250 m
+sigma25_10  <- 25000 / 10    # 2,500 m
+sigma25_3   <- 25000 / 3     # 8,333.33 m
+sigma25_2   <- 25000 / 2     # 12,500 m
+```
+
+*39*
+```{r}
+results50_europa <- extract50_europa |>
+  group_by(ID) |>
+  summarise(
+    # ========================================================================
+    # SCENARIO 1
+    # Radius = 50 km
+    # sigma = 50 km / 10 = 5,000 m
+    #
+    # Missing-data rule:
+    # Evaluate data availability only within one sigma (5 km).
+    # If more than 50% of the pixels located within 5 km are NA,
+    # the final estimate is assigned NA.
+    #
+    # The Gaussian-weighted statistics themselves use all valid pixels
+    # within the complete 50-km extraction radius.
+    # ========================================================================
+    n_sigma10 = sum(distance_m <= sigma50_10, na.rm = TRUE),
+    n_na_sigma10 = sum(is.na(GPP) & distance_m <= sigma50_10, na.rm = TRUE),
+    GPP_Gaussian_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma50_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_10^2)), na.rm = TRUE)),
+    GPP_SD_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_10^2)) * (GPP - GPP_Gaussian_50_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_10^2)), na.rm = TRUE))),
+    GPP_Median_50_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_10^2)))),
+    # ========================================================================
+    # SCENARIO 2
+    # Radius = 50 km
+    # sigma = 50 km / 3 = 16,666.67 m
+    # ========================================================================
+    n_sigma3 = sum(distance_m <= sigma50_3, na.rm = TRUE),
+    n_na_sigma3 = sum(is.na(GPP) & distance_m <= sigma50_3, na.rm = TRUE),
+    GPP_Gaussian_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma50_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_3^2)), na.rm = TRUE)),
+    GPP_SD_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_3^2)) * (GPP - GPP_Gaussian_50_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_3^2)), na.rm = TRUE))),
+    GPP_Median_50_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_3^2)))),
+    # ========================================================================
+    # SCENARIO 3
+    # Radius = 50 km
+    # sigma = 50 km / 2 = 25,000 m
+    # ========================================================================
+    n_sigma2 = sum(distance_m <= sigma50_2, na.rm = TRUE),
+    n_na_sigma2 = sum(is.na(GPP) & distance_m <= sigma50_2, na.rm = TRUE),
+    GPP_Gaussian_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma50_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_2^2)), na.rm = TRUE)),
+    GPP_SD_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma50_2^2)) * (GPP - GPP_Gaussian_50_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_2^2)), na.rm = TRUE))),
+    GPP_Median_50_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma50_2^2)))),
+    # ========================================================================
+    # MINIMUM AND MAXIMUM WITHIN THE COMPLETE 50-km BUFFER
+    # ========================================================================
+    GPP_Min_50 = if (all(is.na(GPP))) { NA_real_ } else { min(GPP, na.rm = TRUE) },
+    GPP_Max_50 = if (all(is.na(GPP))) { NA_real_ } else { max(GPP, na.rm = TRUE) },
+    .groups = "drop"
+  )
+```
+
+
+
+*41*
+```{r}
+# ============================================================
+# EUROPE — SELECT PIXELS WITHIN 25 KM
+
+extract25_europa <- extract50_europa |> filter(distance_m <= 25000)
+```
+
+
+*42*
+```{r}
+results25_europa <- extract25_europa |>
+  group_by(ID) |>
+  summarise(
+    # ========================================================================
+    # SCENARIO 1
+    # Radius = 25 km
+    # sigma = 25 km / 10 = 2,500 m
+    #
+    # Missing-data rule:
+    # Evaluate data availability only within one sigma (2.5 km).
+    # If more than 50% of the pixels located within 2.5 km are NA,
+    # the final estimate is assigned NA.
+    #
+    # The Gaussian-weighted statistics themselves use all valid pixels
+    # within the complete 25-km extraction radius.
+    # ========================================================================
+    n_sigma10 = sum(distance_m <= sigma25_10, na.rm = TRUE),
+    n_na_sigma10 = sum(is.na(GPP) & distance_m <= sigma25_10, na.rm = TRUE),
+    GPP_Gaussian_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma25_10^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_10^2)), na.rm = TRUE)),
+    GPP_SD_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_10^2)) * (GPP - GPP_Gaussian_25_sigma10)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_10^2)), na.rm = TRUE))),
+    GPP_Median_25_sigma10 = if_else(n_sigma10 == 0 | n_na_sigma10 > n_sigma10 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_10^2)))),
+    # ========================================================================
+    # SCENARIO 2
+    # Radius = 25 km
+    # sigma = 25 km / 3 = 8,333.33 m
+    # ========================================================================
+    n_sigma3 = sum(distance_m <= sigma25_3, na.rm = TRUE),
+    n_na_sigma3 = sum(is.na(GPP) & distance_m <= sigma25_3, na.rm = TRUE),
+    GPP_Gaussian_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma25_3^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_3^2)), na.rm = TRUE)),
+    GPP_SD_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_3^2)) * (GPP - GPP_Gaussian_25_sigma3)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_3^2)), na.rm = TRUE))),
+    GPP_Median_25_sigma3 = if_else(n_sigma3 == 0 | n_na_sigma3 > n_sigma3 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_3^2)))),
+    # ========================================================================
+    # SCENARIO 3
+    # Radius = 25 km
+    # sigma = 25 km / 2 = 12,500 m
+    # ========================================================================
+    n_sigma2 = sum(distance_m <= sigma25_2, na.rm = TRUE),
+    n_na_sigma2 = sum(is.na(GPP) & distance_m <= sigma25_2, na.rm = TRUE),
+    GPP_Gaussian_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sum(GPP * exp(-(distance_m^2) / (2 * sigma25_2^2)), na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_2^2)), na.rm = TRUE)),
+    GPP_SD_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, sqrt(sum(exp(-(distance_m^2) / (2 * sigma25_2^2)) * (GPP - GPP_Gaussian_25_sigma2)^2, na.rm = TRUE) / sum(exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_2^2)), na.rm = TRUE))),
+    GPP_Median_25_sigma2 = if_else(n_sigma2 == 0 | n_na_sigma2 > n_sigma2 / 2, NA_real_, matrixStats::weightedMedian(x = GPP[!is.na(GPP)], w = exp(-(distance_m[!is.na(GPP)]^2) / (2 * sigma25_2^2)))),
+    # ========================================================================
+    # MINIMUM AND MAXIMUM WITHIN THE COMPLETE 25-km BUFFER
+    # ========================================================================
+    GPP_Min_25 = if (all(is.na(GPP))) { NA_real_ } else { min(GPP, na.rm = TRUE) },
+    GPP_Max_25 = if (all(is.na(GPP))) { NA_real_ } else { max(GPP, na.rm = TRUE) },
+    .groups = "drop"
+  )
+```
+
+
+*43*
+```{r}
+gpp_gaussian_europa <- results50_europa |>
+  dplyr::select(ID, GPP_Gaussian_50_sigma10, GPP_SD_50_sigma10, GPP_Median_50_sigma10, GPP_Gaussian_50_sigma3, GPP_SD_50_sigma3, GPP_Median_50_sigma3, GPP_Gaussian_50_sigma2, GPP_SD_50_sigma2, GPP_Median_50_sigma2, GPP_Min_50, GPP_Max_50) |>
+  left_join(results25_europa |> dplyr::select(ID, GPP_Gaussian_25_sigma10, GPP_SD_25_sigma10, GPP_Median_25_sigma10, GPP_Gaussian_25_sigma3, GPP_SD_25_sigma3, GPP_Median_25_sigma3, GPP_Gaussian_25_sigma2, GPP_SD_25_sigma2, GPP_Median_25_sigma2, GPP_Min_25, GPP_Max_25), by = "ID")
+```
+
+
+
+*45*
+```{r}
+id_lookup_europa <- pts_europa |> 
+  mutate(ID = row_number()) |> 
+  dplyr::select(ID, id_sample, latitude, longitude)
+
+gpp_gaussian_europa <- gpp_gaussian_europa |> 
+  left_join(id_lookup_europa, by = "ID") |> 
+  relocate(id_sample, latitude, longitude, .after = ID)
+```
+
+*46*
+```{r}
+modern_pollen_europe_gaussian <- modern_pollen_europe |>
+  left_join(
+    gpp_gaussian_europa |>
+      dplyr::select(-ID, -latitude, -longitude),
+    by = "id_sample"
+  )
+```
+
+*47*
+```{r}
+# Gaussian-weighted mean GPP
+ggplot(data = gpp_gaussian_europa) +
+  geom_point(aes(x = longitude, y = latitude, colour = GPP_Gaussian_50_sigma10)) +
+  scale_color_viridis_c(option = "plasma", name = expression(GPP~(g~C~m^{-2}~yr^{-1})))
+
+# Gaussian-weighted SD of GPP
+ggplot(data = gpp_gaussian_europa) +
+  geom_point(aes(x = longitude, y = latitude, colour = GPP_SD_50_sigma10)) +
+  scale_color_viridis_c(option = "plasma", name = expression(GPP~SD~(g~C~m^{-2}~yr^{-1})))
+```
+
+*48*
+```{r}
+saveRDS(
+  gpp_gaussian_europa,
+  "Data/GPP-GEOSIF/Extraction/gpp_gaussian_EUROPA_25_50km.rds"
+)
+
+saveRDS(
+  modern_pollen_europe_gaussian,
+  "Data/GPP-GEOSIF/Extraction/gpp_gaussian_EUROPA_25_50km_modern_pollen.rds"
+)
+```
+
+
+```{r}
+modern_pollen_europe_gaussian |>
+  summarise(
+    cor_50_sigma10 = cor(
+      GPP_Gaussian_50_sigma10,
+      GPP_Median_50_sigma10,
+      use = "complete.obs"
+    ),
+
+    mae_50_sigma10 = mean(
+      abs(
+        GPP_Gaussian_50_sigma10 -
+          GPP_Median_50_sigma10
+      ),
+      na.rm = TRUE
+    )
+  )
+```
+
+
+```{r}
+ggplot(modern_pollen_europe_gaussian,
+  aes(x = GPP_Gaussian_50_sigma2, y = GPP_Median_50_sigma2)) +
+  geom_point(alpha = 0.3) +
+  geom_abline(intercept = 0, slope = 1, colour="firebrick1", linetype="dashed") +
+  labs(title = "relation bewteen GPP median and mean") +
+  coord_equal()
+```
+
+
+
+```{r}
+comparison_mean_median_europe <- tibble(
+  scenario = c("50_sigma10",
+    "50_sigma3",
+    "50_sigma2",
+    "25_sigma10",
+    "25_sigma3",
+    "25_sigma2"
+  ),
+
+  correlation = c(
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma10,
+        modern_pollen_europe_gaussian$Tree_Median_50_sigma10,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma3,
+        modern_pollen_europe_gaussian$Tree_Median_50_sigma3,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma2,
+        modern_pollen_europe_gaussian$Tree_Median_50_sigma2,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma10,
+        modern_pollen_europe_gaussian$Tree_Median_25_sigma10,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma3,
+        modern_pollen_europe_gaussian$Tree_Median_25_sigma3,
+        use = "complete.obs"),
+
+    cor(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma2,
+        modern_pollen_europe_gaussian$Tree_Median_25_sigma2,
+        use = "complete.obs")
+  ),
+
+  MAE = c(
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma10 -
+               modern_pollen_europe_gaussian$Tree_Median_50_sigma10), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma3 -
+               modern_pollen_europe_gaussian$Tree_Median_50_sigma3), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma2 -
+               modern_pollen_europe_gaussian$Tree_Median_50_sigma2), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma10 -
+               modern_pollen_europe_gaussian$Tree_Median_25_sigma10), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma3 -
+               modern_pollen_europe_gaussian$Tree_Median_25_sigma3), na.rm = TRUE),
+
+    mean(abs(modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma2 -
+               modern_pollen_europe_gaussian$Tree_Median_25_sigma2), na.rm = TRUE)
+  ),
+
+  mean_difference = c(
+    mean(modern_pollen_europe_gaussian$Tree_Median_50_sigma10 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma10, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_50_sigma3 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma3, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_50_sigma2 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_50_sigma2, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_25_sigma10 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma10, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_25_sigma3 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma3, na.rm = TRUE),
+
+    mean(modern_pollen_europe_gaussian$Tree_Median_25_sigma2 -
+           modern_pollen_europe_gaussian$Tree_Gaussian_25_sigma2, na.rm = TRUE)
+  )
+)
+
+comparison_mean_median_europe
+```
+
+```{r}
+modern_pollen_europe_gaussian |>
+  filter(
+    !is.na(Tree_Gaussian_50_sigma10),
+    !is.na(Tree_Median_50_sigma10)
+  ) |>
+  mutate(
+    difference = Tree_Median_50_sigma10 -
+      Tree_Gaussian_50_sigma10
+  ) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(difference),
+    MAE = mean(abs(difference)),
+
+    mean_difference_below_20 = mean(
+      difference[Tree_Gaussian_50_sigma10 < 20]
+    ),
+
+    MAE_below_20 = mean(
+      abs(difference[Tree_Gaussian_50_sigma10 < 20])
+    )
+  )
+```
+
+```{r}
+modern_pollen_europe_gaussian |>
+  filter(
+    !is.na(Tree_Gaussian_50_sigma2),
+    !is.na(Tree_Median_50_sigma2)
+  ) |>
+  mutate(
+    difference = Tree_Median_50_sigma2 -
+      Tree_Gaussian_50_sigma2
+  ) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(difference),
+    MAE = mean(abs(difference)),
+
+    mean_difference_below_20 = mean(
+      difference[Tree_Gaussian_50_sigma2 < 20]
+    ),
+
+    MAE_below_20 = mean(
+      abs(difference[Tree_Gaussian_50_sigma2 < 20])
+    )
+  )
+```
+
+
+```{r}
+comparison_bins_50_sigma2 <- modern_pollen_europe_gaussian |>
+  filter(
+    !is.na(Tree_Gaussian_50_sigma2),
+    !is.na(Tree_Median_50_sigma2)
+  ) |>
+  mutate(
+    difference = Tree_Median_50_sigma2 - Tree_Gaussian_50_sigma2,
+
+    tree_bin = cut(
+      Tree_Gaussian_50_sigma2,
+      breaks = c(0, 10, 20, 40, 60, 80, 100),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = c(
+        "0–10",
+        "10–20",
+        "20–40",
+        "40–60",
+        "60–80",
+        "80–100"
+      )
+    )
+  ) |>
+  group_by(tree_bin) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(
+      difference,
+      na.rm = TRUE
+    ),
+
+    median_difference = median(
+      difference,
+      na.rm = TRUE
+    ),
+
+    MAE = mean(
+      abs(difference),
+      na.rm = TRUE
+    ),
+
+    SD_difference = sd(
+      difference,
+      na.rm = TRUE
+    ),
+
+    .groups = "drop"
+  )
+
+comparison_bins_50_sigma2
+```
+
+
+```{r}
+ggplot(
+  comparison_bins_50_sigma2,
+  aes(
+    x = tree_bin,
+    y = mean_difference
+  )
+) +
+  geom_col() +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  labs(
+    x = "Gaussian mean tree cover",
+    y = "Weighted median - weighted mean",
+    title = "Difference between weighted median and mean",
+    subtitle = "Europe, 50-km radius, sigma = 25 km"
+  ) +
+  theme_classic()
+```
+
+
+```{r}
+ggplot(
+  comparison_bins_50_sigma2,
+  aes(
+    x = tree_bin,
+    y = MAE
+  )
+) +
+  geom_col() +
+  labs(
+    x = "Gaussian mean tree cover",
+    y = "Mean absolute difference",
+    title = "Magnitude of mean-median differences",
+    subtitle = "Europe, 50-km radius, sigma = 25 km"
+  ) +
+  theme_classic()
+```
+
+
+```{r}
+comparison_bins_all_europe <- bind_rows(
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "50_sigma10",
+      mean_value = Tree_Gaussian_50_sigma10,
+      median_value = Tree_Median_50_sigma10
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "50_sigma3",
+      mean_value = Tree_Gaussian_50_sigma3,
+      median_value = Tree_Median_50_sigma3
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "50_sigma2",
+      mean_value = Tree_Gaussian_50_sigma2,
+      median_value = Tree_Median_50_sigma2
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "25_sigma10",
+      mean_value = Tree_Gaussian_25_sigma10,
+      median_value = Tree_Median_25_sigma10
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "25_sigma3",
+      mean_value = Tree_Gaussian_25_sigma3,
+      median_value = Tree_Median_25_sigma3
+    ),
+
+  modern_pollen_europe_gaussian |>
+    transmute(
+      scenario = "25_sigma2",
+      mean_value = Tree_Gaussian_25_sigma2,
+      median_value = Tree_Median_25_sigma2
+    )
+
+) |>
+  filter(
+    !is.na(mean_value),
+    !is.na(median_value)
+  ) |>
+  mutate(
+    difference = median_value - mean_value,
+
+    tree_bin = cut(
+      mean_value,
+      breaks = c(0, 10, 20, 40, 60, 80, 100),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = c(
+        "0–10",
+        "10–20",
+        "20–40",
+        "40–60",
+        "60–80",
+        "80–100"
+      )
+    )
+  ) |>
+  group_by(
+    scenario,
+    tree_bin
+  ) |>
+  summarise(
+    n = n(),
+
+    mean_difference = mean(
+      difference,
+      na.rm = TRUE
+    ),
+
+    median_difference = median(
+      difference,
+      na.rm = TRUE
+    ),
+
+    MAE = mean(
+      abs(difference),
+      na.rm = TRUE
+    ),
+
+    SD_difference = sd(
+      difference,
+      na.rm = TRUE
+    ),
+
+    .groups = "drop"
+  )
+
+comparison_bins_all_europe
+```
+
+```{r}
+ggplot(
+  comparison_bins_all_europe,
+  aes(
+    x = tree_bin,
+    y = mean_difference,
+    group = scenario,
+    colour = scenario
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  geom_line() +
+  geom_point() +
+  labs(
+    x = "Gaussian mean tree cover",
+    y = "Weighted median - weighted mean",
+    colour = "Scenario",
+    title = "Weighted median versus weighted mean across tree-cover classes",
+    subtitle = "Europe"
+  ) +
+  theme_classic()
+```
+
+```{r}
+mean_median_diff_europe <- modern_pollen_europe_gaussian |>
+  mutate(
+    difference = Tree_Median_50_sigma2 -
+      Tree_Gaussian_50_sigma2,
+    abs_difference = abs(difference)
+  ) |>
+  dplyr::select(
+    id_sample,
+    latitude,
+    longitude,
+    Tree_Gaussian_50_sigma2,
+    Tree_Median_50_sigma2,
+    Tree_SD_50_sigma2,
+    difference,
+    abs_difference
+  ) |>
+  arrange(desc(abs_difference))
+
+head(mean_median_diff_europe, 20)
+```
+
+Ahora haría una prueba directa: ¿a mayor SD, mayor diferencia absoluta entre media y mediana?
+```{r}
+cor(
+  mean_median_diff_europe$Tree_SD_50_sigma2,
+  mean_median_diff_europe$abs_difference,
+  use = "complete.obs",
+  method = "spearman"
+)
+```
+
+Usaría primero Spearman porque no necesitamos asumir una relación lineal perfecta.
+
+Y el gráfico:
+```{r}
+ggplot(
+  mean_median_diff_europe,
+  aes(
+    x = Tree_SD_50_sigma2,
+    y = abs_difference
+  )
+) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(
+    method = "lm",
+    se = FALSE
+  ) +
+  labs(
+    x = "Gaussian-weighted SD of tree cover",
+    y = "|Weighted median - weighted mean|",
+    title = "Mean–median divergence increases with landscape heterogeneity",
+    subtitle = "Europe, 50-km radius, sigma = 25 km"
+  ) +
+  theme_classic()
+```
+
+```{r}
+comparison_by_sd_europe <- mean_median_diff_europe |>
+  filter(
+    !is.na(Tree_SD_50_sigma2),
+    !is.na(abs_difference)
+  ) |>
+  mutate(
+    sd_bin = cut(
+      Tree_SD_50_sigma2,
+      breaks = c(0, 5, 10, 15, 20, 25, Inf),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = c(
+        "0–5",
+        "5–10",
+        "10–15",
+        "15–20",
+        "20–25",
+        "25+"
+      )
+    )
+  ) |>
+  group_by(sd_bin) |>
+  summarise(
+    n = n(),
+    mean_abs_difference = mean(abs_difference),
+    median_abs_difference = median(abs_difference),
+    .groups = "drop"
+  )
+
+comparison_by_sd_europe
+```
+
