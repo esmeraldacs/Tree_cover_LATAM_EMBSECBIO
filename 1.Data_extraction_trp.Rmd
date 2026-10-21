@@ -1,0 +1,749 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-06-24"
+---
+
+Extract data from 
+
+The global tree restoration potential
+Bustin et al.. 2019
+
+https://www.research-collection.ethz.ch/entities/researchdata/7234f0a1-e37d-4362-99e9-d0e6e75793dc 
+
+*chunk1*
+```{r}
+#library(terra)
+library(tidyverse)
+#library(tidyterra)
+#library(sf)
+#library(matrixStats)
+```
+
+
+Condigo para dos regiones simulataneas
+*chunk2*
+```{r}
+# Load and prepare land polygon for South America
+land_polyg_latam <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-118, -33, -55, 32)) |>
+  sf::st_as_sf() #|>
+ # sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_latam)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_eur <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-20, 62, 29, 75)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf() #|>
+  #sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_eur)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_afr <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-22, 60, -40, 45)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf() #|>
+  #sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_afr)
+```
+
+
+*chunk3*
+```{r}
+tema_map <- theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.28,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=7.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 7.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.05,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.08,0.45))
+```
+
+
+LATAM
+*chunk4*
+```{r}
+# Load the data frames from the RDS file
+data_latam <- readRDS("Data/Input/updated_modern_dataset_climate_hill.rds") |>
+  select(-c(mapr, mi, gdd0, mat, mtco, mtwa, alpha, age_bp))
+
+data_latam
+
+#Remover taxa con valores de cero
+modern_pollen_latam <- data_latam |>
+  pivot_longer(cols = -c(id_sample:entity_type),names_to = "taxa") |>
+  filter(value > 0)
+
+#Remover taxa que ocurren en menos del 1 % de las muestas
+n_total <- n_distinct(modern_pollen_latam$id_sample)
+
+aux1 <- modern_pollen_latam |>
+  group_by(taxa) |>
+  mutate(n_samples = n_distinct(id_sample)) |>
+  ungroup() |>
+  filter(n_samples >= 0.002 * n_total) |>
+  select(-n_samples)
+
+#Funcion para manejar casos donde todos en el grupo son NAs
+mode_na <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) {
+    return(NA_character_)
+  }
+  names(sort(table(x), decreasing = TRUE))[1]
+}
+
+modern_pollen_latam <- aux1 |>
+  group_by(id_sample) |>
+  mutate(value = value / sum(value)) |>
+  ungroup() |>
+  arrange(taxa) |>
+  pivot_wider(
+    id_cols = c(id_sample:entity_type),
+    names_from = "taxa",
+    values_fill = 0
+  ) |>
+  select(-c(id_sample, entity_name)) |>
+  group_by(latitude, longitude) |>
+  summarise(
+    across(
+      where(is.numeric),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    site_type = mode_na(site_type),
+    entity_type = mode_na(entity_type),
+    .groups = "drop"
+  ) |>
+  mutate(id_sample = paste0("ID_", row_number())) |>
+  select(id_sample, everything())
+
+
+modern_pollen_latam <- modern_pollen_latam |>
+  select(id_sample:elevation, site_type, entity_type, everything()) |>
+  select(-site_type, -entity_type)
+  
+modern_pollen_latam
+```
+
+*chunk5*
+```{r}
+# Load the data frames from the RDS file
+data_europe <- read.csv("Data/Input/Modern_Pollen_TrIan_from_climate_recon_EMBSECBIO.csv") |>
+  select(-c(X, gdd, MI, Tmin, alpha)) |>
+  rename(latitude = Lat, 
+         longitude = Long, 
+         elevation = Elv,
+         entity_name = Entity.name,
+         hill_n2 = Hill_N2) |>
+  mutate(id_sample = row_number()) |>
+  select(id_sample, everything())
+
+
+#Remover taxa con valores de cero
+modern_pollen_europe <- data_europe |>
+  pivot_longer(cols = -c(id_sample:hill_n2),names_to = "taxa") |>
+  filter(value > 0)
+
+#Remover taxa que ocurren en menos del 1 % de las muestas
+n_total <- n_distinct(modern_pollen_europe$id_sample)
+
+aux2 <- modern_pollen_europe |>
+  group_by(taxa) |>
+  mutate(n_samples = n_distinct(id_sample)) |>
+  ungroup() |>
+  filter(n_samples >= 0.002 * n_total) |>
+  select(-n_samples)
+
+
+modern_pollen_europe <- aux2 |>
+  group_by(id_sample) |>
+  mutate(value = value / sum(value)) |>
+  ungroup() |>
+  arrange(taxa) |>
+  pivot_wider(id_cols = c(id_sample:hill_n2), 
+              names_from = "taxa", values_fill = 0) |>
+  select(-c(id_sample, entity_name)) |>
+  group_by(latitude, longitude) |>
+  summarise(across(where(is.numeric),~ mean(.x, na.rm = TRUE)),.groups = "drop") |>
+  mutate(id_sample = paste0("ID_", row_number())) |>
+  select(id_sample, everything())
+
+  
+modern_pollen_europe
+```
+
+
+
+
+*chunk6*
+```{r}
+saveRDS(modern_pollen_latam, "Data/Input/modern_pollen_latam.rds")
+
+saveRDS(modern_pollen_europe, "Data/Input/modern_pollen_europe.rds")
+```
+
+*chunk7*
+```{r}
+modern_pollen_latam <- readRDS("Data/Input/modern_pollen_latam.rds")
+
+modern_pollen_europe <- readRDS("Data/Input/modern_pollen_europe.rds") |>
+  filter(longitude <= 62 & latitude <= 75)
+```
+
+*chunk8*
+```{r}
+ggplot() +
+ # geom_sf(data = land_polyg_eur) +
+  geom_point(data = modern_pollen_europe, aes(x=longitude, y=latitude)) 
+```
+
+
+*chunk9*
+```{r}
+r_trp <- rast("C:/Datasets_Tree_Cover/Tree_restoration_potential_Bastin2019/Total_potential.tif")
+
+plot(r_trp)
+```
+
+
+
+
+
+Este solo se ejecuta una vez
+*chunk10*
+```{r}
+# CHUNK 10
+# EPSG:6933 se usa como cuadrícula global equivalente para el raster.
+# No se usará para calcular distancias.
+
+crs_equal_area <- "EPSG:6933"
+
+r_trp_equalarea <- terra::project(r_trp, crs_equal_area, method = "bilinear")
+
+#res(r_trp_equalarea)
+#crs(r_trp_equalarea)
+
+land_latam_vect <- terra::vect(land_polyg_latam)
+land_eur_vect   <- terra::vect(land_polyg_eur)
+land_afr_vect   <- terra::vect(land_polyg_afr)
+
+land_latam_equalarea <- terra::project(land_latam_vect, crs_equal_area)
+land_eur_equalarea   <- terra::project(land_eur_vect, crs_equal_area)
+land_afr_equalarea   <- terra::project(land_afr_vect, crs_equal_area)
+
+r_latam_crop <- r_trp_equalarea |>
+  terra::crop(land_latam_equalarea) |>
+  terra::mask(land_latam_equalarea)
+
+r_europa_crop <- r_trp_equalarea |>
+  terra::crop(land_eur_equalarea) |>
+  terra::mask(land_eur_equalarea)
+
+r_africa_crop <- r_trp_equalarea |>
+  terra::crop(land_afr_equalarea) |>
+  terra::mask(land_afr_equalarea)
+
+res(r_latam_crop)
+res(r_europa_crop)
+res(r_africa_crop)
+
+plot(r_latam_crop, main = "Tree cover - Latin America")
+plot(land_latam_equalarea, add = TRUE)
+
+plot(r_europa_crop, main = "Tree cover - Europe")
+plot(land_eur_equalarea, add = TRUE)
+
+plot(r_africa_crop, main = "Tree cover - Africa")
+plot(land_afr_equalarea, add = TRUE)
+```
+
+*chunk11*
+```{r}
+# 4. Guardar
+writeRaster(r_latam_crop, "Data/Bastin_Forest_potential_tree_cover/raster_cuts/Bastin_potential_tree_LATAM_EPSG6933_land.tif", overwrite = TRUE)
+
+writeRaster(r_europa_crop, "Data/Bastin_Forest_potential_tree_cover/raster_cuts/Bastin_potential_tree_EUROPA_EPSG6933_land.tif", overwrite = TRUE)
+
+writeRaster(r_africa_crop, "Data/Bastin_Forest_potential_tree_cover/raster_cuts/Bastin_potential_tree_AFRICA_EPSG6933_land.tif", overwrite = TRUE)
+```
+
+*chunk12*
+```{r}
+# Abrir los rasters
+r_latam  <- terra::rast("Data/Bastin_Forest_potential_tree_cover/raster_cuts/Bastin_potential_tree_LATAM_EPSG6933_land.tif")/100
+r_europa <- terra::rast("Data/Bastin_Forest_potential_tree_cover/raster_cuts/Bastin_potential_tree_EUROPA_EPSG6933_land.tif")/100
+r_africa <- terra::rast("Data/Bastin_Forest_potential_tree_cover/raster_cuts/Bastin_potential_tree_AFRICA_EPSG6933_land.tif")/100
+
+names(r_latam)  <- "tree_cover"
+names(r_europa) <- "tree_cover"
+names(r_africa) <- "tree_cover"
+
+terra::plot(r_latam, main = "Tree cover - Latin America")
+terra::plot(r_europa, main = "Tree cover - Europe")
+terra::plot(r_africa, main = "Tree cover - Europe")
+```
+
+Plotting of the map
+*chunk13*
+```{r}
+# ============================================================
+# 2. Reducir resolución SOLO para plotting
+#    factor = 5 --> cada 5x5 píxeles se convierte en 1
+# ============================================================
+agg_factor <- 3
+
+r_latam_plot  <- aggregate(r_latam,  fact = agg_factor, fun = mean, na.rm = TRUE)
+r_europa_plot <- aggregate(r_europa, fact = agg_factor, fun = mean, na.rm = TRUE)
+r_africa_plot <- aggregate(r_africa, fact = agg_factor, fun = mean, na.rm = TRUE)
+
+
+r_latam_plot  <- project(r_latam_plot, "EPSG:4326")
+r_europa_plot <- project(r_europa_plot, "EPSG:4326")
+r_africa_plot <- project(r_africa_plot, "EPSG:4326")
+
+# 3. Convertir a data.frame para plotting
+
+df_latam <- as.data.frame(r_latam_plot, xy = TRUE, na.rm = TRUE)
+df_europa <- as.data.frame(r_europa_plot, xy = TRUE, na.rm = TRUE)
+df_africa <- as.data.frame(r_africa_plot, xy = TRUE, na.rm = TRUE)
+
+
+# Renombrar la columna del raster
+names(df_latam)[3]  <- "tree_cover"
+names(df_europa)[3] <- "tree_cover"
+names(df_africa)[3] <- "tree_cover"
+
+
+#saveRDS(df_africa, "C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/Potential tree cover/df_africa_Roebroek_down_resol.rds")
+
+#plot(r_latam_plot, main = "Tree cover - Latin America (reduced resolution)")
+#plot(r_latam, main = "Tree cover - Latin America")
+#plot(r_europa_plot, main = "Tree cover - Europe (reduced resolution)")
+#plot(r_europa, main = "Tree cover - Europe")
+
+map_latam <- ggplot() +
+  geom_sf(data=land_polyg_latam) +
+  geom_tile(data = df_latam, aes(x=x, y=y, fill=tree_cover)) +
+  rcartocolor::scale_fill_carto_c(palette = "ag_GrnYl",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, fill = "(%)", subtitle = "Potential tree cover (Bastin et al., 2019)") +
+  tema_map
+  
+  
+map_latam  
+
+map_europe <- ggplot() +
+  geom_sf(data=land_polyg_eur) +
+  geom_tile(data = df_europa, aes(x=x, y=y, fill=tree_cover)) +
+  rcartocolor::scale_fill_carto_c(palette = "ag_GrnYl",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, fill = "(%)", subtitle = "Potential tree cover (Bastin et al., 2019)") +
+  tema_map
+  
+  
+map_europe 
+
+
+map_africa <- ggplot() +
+  geom_sf(data=land_polyg_afr) +
+  geom_tile(data = df_africa, aes(x=x, y=y, fill=tree_cover)) +
+  rcartocolor::scale_fill_carto_c(palette = "ag_GrnYl",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, fill = "(%)", subtitle = "Potential tree cover (Bastin et al., 2019)") +
+  tema_map
+  
+  
+map_africa
+```
+
+*chunk14*
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/Bastint_tree_cover/Bastin_map_bin.JPG", plot = map_latam,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+*chunk15*
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/Bastin_tree_cover/Bastin_map_bin.JPG", plot = map_europe,
+       width = 4, height = 4, units = "in", dpi = 300)
+
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/AFRICA/Bastin_tree_cover/Bastin_map_bin.JPG", plot = map_africa,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+
+
+1. Preparar únicamente id_sample, latitud y longitud
+*chunk16*
+```{r}
+# Puntos LATAM
+pts_latam <- modern_pollen_latam |> dplyr::select(id_sample, latitude, longitude)
+# Puntos Europa
+pts_europa <- modern_pollen_europe |> dplyr::select(id_sample, latitude, longitude)
+
+nrow(pts_latam)
+nrow(pts_europa)
+```
+
+
+*chunk17*
+```{r}
+# CHUNK 17 — comprobar coordenadas de los sitios en WGS84
+# No proyectar los puntos: las distancias se calcularán después
+# como distancias geodésicas.
+
+stopifnot(all(c("id_sample", "latitude", "longitude") %in% names(pts_latam)),
+          all(c("id_sample", "latitude", "longitude") %in% names(pts_europa)))
+
+summary(pts_latam[c("latitude", "longitude")])
+summary(pts_europa[c("latitude", "longitude")])
+
+```
+
+
+*chunk18*
+```{r}
+# CHUNK 18 — extraer celdas candidatas con buffers locales
+candidate_radius_km <- 51
+
+extract_candidates_local <- function(r, pts, candidate_radius_km) {
+
+  raster_crs_sf <- sf::st_crs(terra::crs(r))
+
+  purrr::map_dfr(seq_len(nrow(pts)), function(i) {
+
+    lon <- pts$longitude[i]
+    lat <- pts$latitude[i]
+
+    # Proyección equidistante centrada en este sitio
+    crs_local <- sprintf(paste("+proj=aeqd +lat_0=%.8f +lon_0=%.8f",
+                               "+datum=WGS84 +units=m +no_defs +type=crs"), lat, lon)
+
+    buffer_raster_crs <- sf::st_sfc(sf::st_point(c(lon, lat)),crs = 4326) |>
+      sf::st_transform(crs_local) |>
+      sf::st_buffer(dist = candidate_radius_km * 1000, nQuadSegs = 90) |>
+      sf::st_transform(raster_crs_sf)
+
+    extracted <- terra::extract(r, terra::vect(buffer_raster_crs),
+                                cells = TRUE, xy = TRUE, touches = TRUE)
+
+    if (nrow(extracted) == 0) {
+      return(tibble::tibble())
+    }
+
+    tibble::as_tibble(extracted) |>
+      dplyr::mutate(ID = i)
+  })
+}
+
+extract_candidates_latam <- extract_candidates_local(r = r_latam,
+                                                     pts = pts_latam,
+                                                     candidate_radius_km = candidate_radius_km)
+
+extract_candidates_europa <- extract_candidates_local(r = r_europa,
+                                                      pts = pts_europa,
+                                                      candidate_radius_km = candidate_radius_km)
+```
+
+
+
+*chunk19*
+```{r}
+# CHUNK 19 — calcular distancias geodésicas en km
+add_geodesic_distance <- function(extracted, pts, r, candidate_radius_km) {
+
+  point_lookup <- tibble::tibble(ID = seq_len(nrow(pts)),
+                                 site_lon = pts$longitude,
+                                 site_lat = pts$latitude)
+
+  extracted |>
+    dplyr::left_join(point_lookup, by = "ID") |>
+    dplyr::group_by(ID) |>
+    dplyr::group_modify(function(.x, .y) {
+
+      cell_points <- terra::vect(.x, geom = c("x", "y"), crs = terra::crs(r))
+      cell_wgs84 <- terra::project(cell_points, "EPSG:4326")
+      cell_lonlat <- terra::crds(cell_wgs84)
+      distances_km <- geosphere::distGeo(p1 = c(.x$site_lon[1], .x$site_lat[1]),
+                                         p2 = cell_lonlat) / 1000
+
+      .x |>
+        dplyr::mutate(distance_km = distances_km) |>
+        dplyr::filter(distance_km <= candidate_radius_km)
+    }) |>
+    dplyr::ungroup() |>
+    dplyr::select(-site_lon, -site_lat)
+}
+
+
+extract_geod_latam <- add_geodesic_distance(extracted = extract_candidates_latam,
+                                            pts = pts_latam,
+                                            r = r_latam,
+                                            candidate_radius_km = candidate_radius_km)
+
+extract_geod_europa <- add_geodesic_distance(extracted = extract_candidates_europa,
+                                             pts = pts_europa,
+                                             r = r_europa,
+                                            candidate_radius_km = candidate_radius_km)
+```
+
+
+
+*chunk20*
+```{r}
+# CHUNK 20 — comprobar extracciones y distancias
+
+check_extraction <- function(data, pts, region) {
+  tibble::tibble(
+    region = region,
+    sites_expected = nrow(pts),
+    sites_extracted = dplyr::n_distinct(data$ID),
+    pixels_extracted = nrow(data),
+    min_distance_km = min(data$distance_km, na.rm = TRUE),
+    median_distance_km = median(data$distance_km, na.rm = TRUE),
+    max_distance_km = max(data$distance_km, na.rm = TRUE)
+  )
+}
+
+dplyr::bind_rows(check_extraction(extract_geod_latam, pts_latam, "LATAM"),
+                 check_extraction(extract_geod_europa, pts_europa, "Europa"))
+```
+
+
+
+
+*chunk21*
+```{r}
+# CHUNK 21 — liberar extracciones intermedias
+
+rm(extract_candidates_latam, extract_candidates_europa)
+gc()
+```
+
+
+
+*chunk22*
+```{r}
+# CHUNK 22 — guardar extracciones geodésicas
+out_dir <- "Data/Bastin_Forest_potential_tree_cover/extraction_points"
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+saveRDS(extract_geod_latam, 
+        file.path(out_dir, "Bastin_treecover_LATAM_geodesic_candidates_51km_grid6933.rds"))
+
+saveRDS(extract_geod_europa,
+        file.path(out_dir, "Bastin_treecover_EUROPA_geodesic_candidates_51km_grid6933.rds"))
+```
+
+
+
+*chunk23*
+```{r}
+# CHUNK 23 — volver a cargar las extracciones en una sesión nueva
+out_dir <- "Data/Bastin_Forest_potential_tree_cover/extraction_points"
+
+extract_geod_latam <- readRDS(file.path(out_dir, "Bastin_treecover_LATAM_geodesic_candidates_51km_grid6933.rds"))
+
+extract_geod_europa <- readRDS(file.path(out_dir, "Bastin_treecover_EUROPA_geodesic_candidates_51km_grid6933.rds"))
+```
+
+
+*chunk24*
+```{r}
+# CHUNK 24 — revisar las extracciones geodésicas
+
+dplyr::glimpse(extract_geod_latam)
+dplyr::glimpse(extract_geod_europa)
+
+extract_geod_latam |>
+  dplyr::select(ID, cell, x, y, tree_cover, distance_km) |>
+  dplyr::slice_head(n = 6)
+```
+
+
+*chunk25*
+```{r}
+# CHUNK 25 — definir escenarios: sigma = radio / 3
+
+scenarios <- tibble::tibble(radius_km = c(1.5, 2.5, 5, 10, 25)) |>
+  dplyr::mutate(sigma_km = radius_km / 3,
+                scenario = paste0(radius_km, "km"))
+
+scenarios
+```
+
+
+*chunk26*
+```{r}
+# CHUNK 26 — calcular resúmenes gaussianos por sitio y escenario
+max_radius_km <- max(scenarios$radius_km)
+
+# Reducir las tablas en memoria al radio máximo de los escenarios actuales
+extract_current_latam <- extract_geod_latam |> dplyr::filter(distance_km <= max_radius_km)
+
+rm(extract_geod_latam)
+gc()
+
+extract_current_europa <- extract_geod_europa |>
+  dplyr::filter(distance_km <= max_radius_km)
+
+rm(extract_geod_europa)
+gc()
+
+# Calcular media y mediana ponderadas para un sitio
+summarise_gaussian_site <- function(data, sigma_km) {
+
+  valid <- !is.na(data$tree_cover)
+
+  if (!any(valid) || mean(!valid) > 0.5) {
+    return(tibble::tibble(tree_mean = NA_real_, tree_median = NA_real_ ))
+  }
+
+  values <- data$tree_cover[valid]
+
+  weights <- exp(-0.5 * (data$distance_km[valid] / sigma_km)^2)
+
+  tibble::tibble(tree_mean = sum(values * weights) / sum(weights),
+                 tree_median = matrixStats::weightedMedian(x = values, w = weights))
+}
+
+
+# Aplicar todos los escenarios a una región
+calculate_gaussian_scenarios <- function(extracted, scenarios) {
+
+  purrr::map_dfr(seq_len(nrow(scenarios)), function(i) {
+
+    radius_i <- scenarios$radius_km[i]
+    sigma_i  <- scenarios$sigma_km[i]
+
+    extracted |>
+      dplyr::filter(distance_km <= radius_i) |>
+      dplyr::group_by(ID) |>
+      dplyr::group_modify(~ summarise_gaussian_site(.x, sigma_km = sigma_i)) |>
+      dplyr::ungroup() |>
+      dplyr::mutate(scenario = scenarios$scenario[i])
+  })
+}
+
+
+results_latam_long <- calculate_gaussian_scenarios(extracted = extract_current_latam,
+                                                   scenarios = scenarios)
+
+results_europa_long <- calculate_gaussian_scenarios(extracted = extract_current_europa,
+                                                    scenarios = scenarios)
+```
+
+
+
+
+*chunk27*
+```{r}
+# CHUNK 27 — pasar a formato ancho y unir a las tablas de polen
+
+id_lookup_latam <- tibble::tibble(ID = seq_len(nrow(pts_latam)),
+                                  id_sample = pts_latam$id_sample)
+
+id_lookup_europa <- tibble::tibble(ID = seq_len(nrow(pts_europa)),
+                                   id_sample = pts_europa$id_sample)
+
+
+tree_gaussian_latam_wide <- results_latam_long |>
+  dplyr::left_join(id_lookup_latam, by = "ID") |>
+  tidyr::pivot_wider(id_cols = c(ID, id_sample),
+                     names_from = scenario,
+                     values_from = c(tree_mean, tree_median),
+                     names_glue = "{.value}_{scenario}")
+
+tree_gaussian_europa_wide <- results_europa_long |>
+  dplyr::left_join(id_lookup_europa, by = "ID") |>
+  tidyr::pivot_wider(id_cols = c(ID, id_sample),
+                     names_from = scenario,
+                     values_from = c(tree_mean, tree_median),
+                     names_glue = "{.value}_{scenario}")
+
+
+modern_pollen_latam_gaussian <- modern_pollen_latam |>
+  dplyr::left_join(tree_gaussian_latam_wide |> dplyr::select(-ID),
+                   by = "id_sample")
+
+modern_pollen_europa_gaussian <- modern_pollen_europe |>
+  dplyr::left_join(tree_gaussian_europa_wide |> dplyr::select(-ID), by = "id_sample")
+
+
+dim(modern_pollen_latam_gaussian)
+dim(modern_pollen_europa_gaussian)
+```
+
+
+
+
+```{r}
+ggplot(data = modern_pollen_europa_gaussian) +
+  geom_point(aes(x=longitude, y=latitude, colour = tree_median_25km)) +
+  scale_color_viridis_c(option = "plasma")
+
+ggplot(data = modern_pollen_europa_gaussian) +
+  geom_point(aes(x=longitude, y=latitude, colour = tree_median_1.5km)) +
+  scale_color_viridis_c(option = "plasma")
+```
+
+
+```{r}
+# CHUNK 28 — validar y guardar las tablas finales
+
+expected_columns <- c(paste0("tree_mean_", scenarios$scenario),
+  paste0("tree_median_", scenarios$scenario))
+
+stopifnot(nrow(modern_pollen_latam_gaussian) == nrow(modern_pollen_latam),
+          nrow(modern_pollen_europa_gaussian) == nrow(modern_pollen_europe),
+          all(expected_columns %in% names(modern_pollen_latam_gaussian)),
+          all(expected_columns %in% names(modern_pollen_europa_gaussian)))
+
+# Número de estimaciones no faltantes por columna
+check_estimates <- function(data, region) {
+  data |>
+    dplyr::summarise(dplyr::across(dplyr::all_of(expected_columns), ~ sum(!is.na(.x)))) |>
+    dplyr::mutate(region = region, .before = 1)
+}
+
+
+dplyr::bind_rows(check_estimates(modern_pollen_latam_gaussian, "LATAM"), 
+                 check_estimates(modern_pollen_europa_gaussian, "Europa"))
+
+```
+
+
+```{r}
+# Guardar las tablas finales
+saveRDS(modern_pollen_latam_gaussian,
+  "Data/Bastin_Forest_potential_tree_cover/extraction_points/modern_pollen_LATAM_gaussian_geodesic.rds")
+
+saveRDS(modern_pollen_europa_gaussian,
+  "Data/Bastin_Forest_potential_tree_cover/extraction_points/modern_pollen_EUROPA_gaussian_geodesic.rds")
+```
+
+

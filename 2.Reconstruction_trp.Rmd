@@ -1,0 +1,868 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-07-05"
+---
+
+### Rationale and selection of the bin width for the *fx* correction
+
+The `fx` correction accounts for the frequency distribution of the target variable in the modern calibration dataset. This is relevant because tree-cover values are not represented uniformly: densely sampled portions of the gradient may have a disproportionate influence on model calibration, whereas uncommon values may be poorly represented. When `fx_method = "pspline"` is used, the frequency distribution is estimated and smoothed using a penalized spline. The `bin` parameter determines the width of the target intervals used to estimate this distribution and therefore controls the balance between resolution and stability. Very narrow bins preserve fine-scale variation but may produce noisy frequency estimates with limited observations per interval, whereas very wide bins provide more stable estimates but may obscure meaningful variation in the target gradient.
+
+#Identification of pseudo-sites
+
+To reduce the influence of spatial and environmental pseudoreplication during cross-validation, pseudo-sites were identified separately for each tree-cover target. Pseudo-sites are calibration samples that are both geographically close to the test sample and similar in their observed target value. In this analysis, similarity refers to tree cover rather than climate.
+
+# Leave-out cross-validation
+
+Predictive performance was evaluated separately for each region and tree-cover target using pseudo-site leave-out cross-validation. Unlike standard leave-one-out cross-validation, this procedure excludes not only the test sample but also calibration samples identified as its pseudo-sites. These samples are geographically close to the test site and have similar observed tree-cover values. Their exclusion reduces the risk of obtaining overly optimistic performance estimates due to spatial and environmental pseudoreplication.
+
+For each cross-validation cycle, the fxTWA-PLS model was recalibrated using the remaining samples and then used to predict the tree-cover value of the excluded test sample. Models were evaluated with up to five PLS components, using the P-spline frequency correction and a target bin width of five percentage points. The same model settings were applied to all tree-cover targets to facilitate comparison among Gaussian weighting scenarios.
+
+Cross-validation was conducted independently for each target because missing raster values resulted in slightly different sample compositions. Consequently, every target was evaluated using its corresponding pollen matrix, target vector, coordinate data, and pseudo-site structure. Results were saved separately immediately after completing each target to preserve completed calculations in the event of an interrupted run.
+
+# Randomization t-test and selection of PLS components
+
+A randomization t-test was applied to the cross-validation results to assess whether the addition of successive PLS components produced a statistically meaningful improvement in predictive performance. The test was conducted independently for every region and tree-cover target using 999 permutations.
+
+The procedure compares the reduction in cross-validated prediction error associated with each additional component against a distribution generated through randomization. Components were therefore assessed using both the change in root mean squared error of prediction (ΔRMSEP) and its associated permutation-based probability. A low probability indicates that the observed improvement in predictive performance is unlikely to have occurred by chance.
+
+The number of components should not be selected solely from the model with the lowest calibration error, as calibration error generally decreases when model complexity increases. Instead, component selection was based on cross-validated performance and the randomization test. Preference was given to the smallest model that captured the reproducible predictive signal, avoiding additional components that did not provide a statistically supported reduction in RMSEP.
+
+Randomization-test results were combined into a single table containing the region, tree-cover target, component number, cross-validation statistics, and permutation-test results. This allowed component performance to be compared consistently among Gaussian weighting scenarios and between Europe and Latin America.
+
+
+
+```{r}
+#You can install the released version of fxTWAPLS from CRAN with:
+#install.packages("fxTWAPLS")
+library(tidyverse)
+library(fxTWAPLS)
+library(foreach)
+```
+
+
+```{r}
+# Load and prepare land polygon for South America
+land_polyg_latam <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-118, -33, -55, 32)) |>
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_latam)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_eur <- sf::st_read(
+  "H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-20, 62, 29, 75)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf()
+
+ggplot() + geom_sf(data = land_polyg_eur)
+
+
+# Load and prepare land polygon for Europe
+land_polyg_afr <- sf::st_read("H:/Mi unidad/Research/Natural_earth_data/Land_polygon_large_ne_10m_land/ne_10m_land.shp") |>
+  sf::st_transform(crs = 4326) |>
+  sf::as_Spatial() |>
+  raster::crop(raster::extent(-22, 60, -40, 45)) |> #min,x, max.x, min.y, max.y
+  sf::st_as_sf() #|>
+  #sf::st_transform(crs = 6933)
+
+ggplot() + geom_sf(data = land_polyg_afr)
+```
+
+
+1. Setup – define constants and load data
+```{r}
+europe_extraction <- readRDS("C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Bastin_Forest_potential_tree_cover/extraction_points/modern_pollen_EUROPA_gaussian_geodesic.rds")
+
+grep("tree_", names(europe_extraction), value = TRUE)
+```
+
+
+
+```{r}
+europe_extraction <- readRDS("C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Bastin_Forest_potential_tree_cover/extraction_points/modern_pollen_EUROPA_gaussian_geodesic.rds") |>
+#  select(-c("tree_mean_1.5km",
+           # "tree_mean_2.5km",
+           # "tree_mean_5km",     
+           # "tree_mean_10km",
+           # "tree_mean_25km",    
+           # "tree_median_1.5km",
+           # "tree_median_2.5km", 
+           # "tree_median_5km",   
+           # "tree_median_10km",  
+           # "tree_median_25km"
+           # )) |>
+  select(id_sample, latitude, longitude, elevation, hill_n2, 
+         tree_mean_1.5km,
+         tree_mean_2.5km,
+        tree_mean_5km,     
+        tree_mean_10km,
+        tree_mean_25km,    
+        tree_median_1.5km,
+        tree_median_2.5km, 
+        tree_median_5km,   
+        tree_median_10km,  
+        tree_median_25km, everything())
+
+europe_extraction
+
+grep("tree_", names(europe_extraction), value = TRUE)
+```
+
+
+
+Chunk 1: Initial set up and load data
+```{r}
+# Definir las columnas target (las de extracción de raster)
+target_cols <- c( "tree_mean_1.5km",   
+                  "tree_mean_2.5km",   
+                  "tree_mean_5km",     
+                  "tree_mean_10km",   
+                  "tree_mean_25km",  
+                  "tree_median_1.5km", 
+                  "tree_median_2.5km", 
+                  "tree_median_5km",  
+                  "tree_median_10km", 
+                  "tree_median_25km")
+
+# Identificar las columnas que NO son target (identificadores + taxa)
+# Para LATAM
+id_cols <- c("id_sample" ,    "latitude" ,        "longitude"       ,"elevation"   ,"hill_n2"  )
+```
+
+
+
+
+Identificar los taxones de cada dataset
+Y crear un da
+```{r}
+#======= EUROPE ========
+taxa_cols_europe <- setdiff(names(europe_extraction), 
+                          c(id_cols, target_cols))
+
+head(taxa_cols_europe, 2); tail(taxa_cols_europe, 2)
+
+
+
+# Crear una lista de dataframes para EUROPE, cada uno con un target diferente
+europe_target_list <- purrr::map(target_cols, \(target) {
+  europe_extraction |>
+    dplyr::select(dplyr::all_of(c(id_cols, target, taxa_cols_europe))) |>
+    dplyr::filter(!is.na(.data[[target]]))
+}) |> purrr::set_names(target_cols)
+
+
+europe_target_list[["tree_median_25km"]]
+
+```
+
+
+```{r}
+# Extraer componentes para EUROPA
+europe_twapls_data <- purrr::map2(
+  europe_target_list,
+  names(europe_target_list),
+  ~ {
+    df <- .x
+    target <- .y
+    
+    # Identificar las columnas fijas presentes
+    id_cols_present <- intersect(id_cols, names(df))
+    
+    # Excluir identificadores y el target de las columnas de taxones
+    exclude <- c(id_cols_present, target)
+    taxa_cols <- setdiff(names(df), exclude)
+    
+    list(
+      taxa = df |> dplyr::select(all_of(taxa_cols)),
+      target = df[[target]],
+      coords = df |> dplyr::select(longitude, latitude),
+      ids = df$id_sample
+    )
+  }
+)
+
+
+range(europe_twapls_data[["tree_median_25km"]]$target)
+```
+
+
+
+```{r, warning=FALSE}
+fit_targets_europe <- europe_twapls_data |>
+  purrr::map(
+    \(data) {
+      fxTWAPLS::TWAPLS.w2(
+        data$taxa,
+        data$target,
+        nPLS = 5,
+        usefx = TRUE,
+        fx_method = "pspline",
+        bin = 0.005
+      )
+    }
+  )
+```
+
+
+
+
+Because samples with missing target values were removed independently for each target, the resulting datasets differed slightly in their sample composition. Geographic distance matrices were therefore calculated separately for every combination of region and tree-cover target, ensuring that the rows and columns of each matrix matched the corresponding pollen, target, coordinate, and sample-ID data.
+
+Pairwise geographic distances were calculated from sample longitude and latitude using get_distance(). The resulting distance matrix and the corresponding tree-cover target were then supplied to get_pseudo(). During cross-validation, the test sample and its associated pseudo-sites can be excluded from model training, providing a more conservative assessment of predictive performance by reducing the contribution of geographically close samples with similar tree-cover conditions.
+```{r}
+CPUS <- 10
+
+#Distancias para Eruopa
+dist_targets_europe <- europe_twapls_data |>
+  purrr::imap(
+    \(data, target_name) {
+      
+      message("Calculating distances for: ", target_name)
+      
+      fxTWAPLS::get_distance(
+        data$coords,
+        cpus = CPUS
+      )
+    }
+  )
+
+
+#Pseudosites para Europa
+pseudo_targets_europe <- purrr::map2(
+  dist_targets_europe,
+  europe_twapls_data,
+  \(distance_matrix, data) {
+    
+    fxTWAPLS::get_pseudo(
+      distance_matrix,
+      data$target,
+      cpus = CPUS
+    )
+  }
+)
+
+
+saveRDS(dist_targets_europe, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/dist_targets_europe_bin0.2.rds")
+
+
+saveRDS(pseudo_targets_europe, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/pseudo_targets_europe_bin1.5.rds")
+
+
+#Distancias para LATAM
+dist_targets_latam <- latam_twapls_data |>
+  purrr::imap(
+    \(data, target_name) {
+      
+      message("Calculating distances for: ", target_name)
+      
+      fxTWAPLS::get_distance(
+        data$coords,
+        cpus = CPUS
+      )
+    }
+  )
+
+
+#Pseudosites para LATAM
+pseudo_targets_latam <- purrr::map2(
+  dist_targets_latam,
+  latam_twapls_data,
+  \(distance_matrix, data) {
+    
+    fxTWAPLS::get_pseudo(
+      distance_matrix,
+      data$target,
+      cpus = CPUS
+    )
+  }
+)
+
+
+saveRDS(dist_targets_latam, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/dist_targets_latam_bin0.2.rds")
+
+
+saveRDS(pseudo_targets_latam, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/pseudo_targets_latam_bin1.5.rds")
+```
+
+
+```{r}
+iteration <- "i5"
+
+cv_path <- "Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/"
+
+dir.create(
+  cv_path,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+
+
+#Validacion cruzada para Europa
+
+
+
+cv_targets_europe <- purrr::imap(
+  europe_twapls_data,
+  \(data, target_name) {
+    
+    message("Cross-validating Europe: ", target_name)
+    
+    pseudo <- pseudo_targets_europe[[target_name]]
+    
+    result <- fxTWAPLS::cv.pr.w(
+      data$taxa,
+      data$target,
+      nPLS = 5,
+      fxTWAPLS::TWAPLS.w2,
+      fxTWAPLS::TWAPLS.predict.w,
+      pseudo,
+      usefx = TRUE,
+      fx_method = "pspline",
+      bin = 0.2,
+      cpus = CPUS,
+      test_mode = FALSE
+    ) |>
+      fxTWAPLS::pb()
+    
+    write.csv(
+      result,
+      file.path(
+        cv_path,
+        paste0(
+          "cv_europe_",
+          target_name,
+          "_bin0.2_median",
+          iteration,
+          ".csv"
+        )
+      ),
+      row.names = FALSE
+    )
+    
+    result
+  }
+)
+```
+
+
+```{r}
+#Validacion cruzada para LATAM
+
+
+cv_targets_latam <- purrr::imap(
+  latam_twapls_data,
+  \(data, target_name) {
+    
+    message("Cross-validating LATAM: ", target_name)
+    
+    pseudo <- pseudo_targets_latam[[target_name]]
+    
+    result <- fxTWAPLS::cv.pr.w(
+      data$taxa,
+      data$target,
+      nPLS = 5,
+      fxTWAPLS::TWAPLS.w2,
+      fxTWAPLS::TWAPLS.predict.w,
+      pseudo,
+      usefx = TRUE,
+      fx_method = "pspline",
+      bin = 1.5,
+      cpus = CPUS,
+      test_mode = FALSE
+    ) |>
+      fxTWAPLS::pb()
+    
+    write.csv(
+      result,
+      file.path(
+        cv_path,
+        paste0(
+          "cv_latam_",
+          target_name,
+          "_bin1.5",
+          iteration,
+          ".csv"
+        )
+      ),
+      row.names = FALSE
+    )
+    
+    result
+  }
+)
+```
+
+
+Cargar los archivos individuales 
+```{r}
+cv_path <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/"
+
+
+
+cv_files_europe <- list.files(
+  cv_path,
+  pattern = "^cv_europe_Tree_Gaussian_.*_bin0.2_i4\\.csv$",
+  full.names = TRUE)
+
+basename(cv_files_europe)
+length(cv_files_europe)
+
+
+target_names_europe <- basename(cv_files_europe) |>
+  stringr::str_remove("^cv_europe_") |>
+  stringr::str_remove("_bin0.2_i4.csv$")
+
+
+#4. Reconstruir la lista cv_targets europe
+cv_targets_europe <- cv_files_europe |>
+  purrr::map(readr::read_csv, show_col_types = FALSE) |> rlang::set_names(target_names_europe)
+
+
+cv_targets_europe <- cv_targets_europe |>
+  purrr::map(as.data.frame)
+
+
+
+```
+
+
+```{r}
+metadata <- c(
+  "id_sample",
+  "latitude",
+  "longitude",
+  "elevation",
+  "hill_n2"
+)
+
+for (modelo in modelos_comunes) {
+
+  cv <- cv_targets_europe[[modelo]]
+  target <- europe_target_list[[modelo]]
+
+  # Comprobaciones de seguridad
+  stopifnot(nrow(cv) == nrow(target))
+  
+  stopifnot(
+    isTRUE(all.equal(
+      cv$test.x,
+      target[[modelo]]
+    ))
+  )
+
+  # Añadir los 5 metadatos al inicio
+  cv_targets_europe[[modelo]] <- cbind(
+    target[, metadata, drop = FALSE],
+    cv
+  )
+}
+
+# Ver columnas de uno de los modelos modificados
+names(cv_targets_europe[["Tree_Gaussian_50_sigma10"]])
+```
+
+
+
+```{r}
+saveRDS(cv_targets_europe, "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/cv_targets_europe_bin0.2_i4.rds" )
+```
+
+
+
+```{r}
+cv_path <- "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/"
+
+cv_files_latam <- list.files(
+  cv_path,
+  pattern = "^cv_latam_Tree_Gaussian_.*_bin1.5i4\\.csv$",
+  full.names = TRUE)
+
+basename(cv_files_latam)
+length(cv_files_latam)
+
+
+
+target_names_latam <- basename(cv_files_latam) |>
+  stringr::str_remove("^cv_latam_") |>
+  stringr::str_remove("_bin1.5i4.csv$")
+
+
+#4. Reconstruir la lista cv_targets europe
+cv_targets_latam <- cv_files_latam |>
+  purrr::map(readr::read_csv, show_col_types = FALSE) |> rlang::set_names(target_names_latam)
+
+
+cv_targets_latam <- cv_targets_latam |>
+  purrr::map(as.data.frame)
+```
+
+```{r}
+metadata <- c(
+  "id_sample",
+  "latitude",
+  "longitude",
+  "elevation",
+  "hill_n2"
+)
+
+for (modelo in modelos_comunes_latam) {
+
+  cv <- cv_targets_latam[[modelo]]
+  target <- latam_target_list[[modelo]]
+
+  # Comprobaciones de seguridad
+  stopifnot(nrow(cv) == nrow(target))
+
+  stopifnot(
+    isTRUE(all.equal(
+      cv$test.x,
+      target[[modelo]]
+    ))
+  )
+
+  # Añadir los metadatos al inicio
+  cv_targets_latam[[modelo]] <- cbind(
+    target[, metadata, drop = FALSE],
+    cv
+  )
+}
+
+names(
+  cv_targets_latam[["Tree_Gaussian_50_sigma10"]]
+)
+```
+
+```{r}
+saveRDS(cv_targets_latam, "C:/Research/Tree_cover_LATAM_EMBSECBIO/Data/Potential_tree_cover/Output_calibration_and_reconstruction/Cross_validation/cv_targets_latam_bin1.5_i4.rds" )
+
+
+```
+
+
+Random t-test 
+```{r}
+#para Europa
+set.seed(9751)
+
+rand_targets_europe <- cv_targets_europe |>
+  purrr::imap(
+    \(cv_result, target_name) {
+      
+      message("Random t-test for Europe: ", target_name)
+      
+      fxTWAPLS::rand.t.test.w(
+        cv_result,
+        n.perm = 999
+      ) |>
+        as_tibble() |>
+        mutate(
+          region = "Europe",
+          target = target_name,
+          n_comp = row_number(),
+          .before = 1
+        )
+    }
+  )
+
+#para LATAM
+set.seed(9751)
+
+rand_targets_latam <- cv_targets_latam |>
+  purrr::imap(
+    \(cv_result, target_name) {
+      
+      message("Random t-test for LATAM: ", target_name)
+      
+      fxTWAPLS::rand.t.test.w(
+        cv_result,
+        n.perm = 999
+      ) |>
+        as_tibble() |>
+        mutate(
+          region = "LATAM",
+          target = target_name,
+          n_comp = row_number(),
+          .before = 1
+        )
+    }
+  )
+```
+
+
+```{r}
+rand_table_europe <- bind_rows(rand_targets_europe)
+
+rand_table_latam <- bind_rows(rand_targets_latam)
+```
+
+
+```{r}
+rand_table_all <- bind_rows(
+  rand_table_europe,
+  rand_table_latam) |>
+  select(region, target, n_comp, everything())
+```
+
+
+```{r}
+write.csv(rand_table_europe, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/random_t_test_europe_bin0.2_median_i5.csv", row.names = FALSE)
+
+write.csv(rand_table_latam, "Data/Potential_tree_cover/Output_calibration_and_reconstruction/random_t_test_latam_bin1.5.csv", row.names = FALSE)
+
+```
+
+
+```{r}
+write.csv(
+  rand_table_all,
+  "Data/Potential_tree_cover/Output_calibration_and_reconstruction/random_t_test_all_regions_bin1.5latam_and_0.2europe.csv",
+  row.names = FALSE)
+```
+
+#Despues de una seleccion manual de los componentes
+
+```{r}
+plot_data_latam <- cv_targets_latam[["Tree_Gaussian_50_sigma2"]] |>
+  as_tibble() |>
+  transmute(
+    region = "LATAM",
+    target = "Tree_Gaussian_50_sigma2",
+    component = 3L,
+    id_sample = latam_twapls_data[["Tree_Gaussian_50_sigma2"]]$ids,
+    observed = test.x,
+    predicted = comp4
+  ) |>
+  left_join(select(latam_extraction, id_sample, latitude, longitude, elevation),
+            by = "id_sample")
+
+aux_metrics <- rand_table_latam |>
+  filter(target == "Tree_Gaussian_50_sigma2" & n_comp == 3) |>
+  mutate(
+    R2 = round(R2, 2),
+    RMSEP = round(RMSEP, 2),
+    Compre.b1 = round(Compre.b1, 2)
+  )
+
+  # Texto para las métricas
+ metrics_text <- paste0(paste0("R² = ", aux_metrics$R2, "\n"),
+                         paste0("RMSEP = ", aux_metrics$RMSEP, "\n"),
+                         paste0("b1 = ", aux_metrics$Compre.b1))
+  
+
+
+# Calcular rangos extendidos (15% más allá de los datos)
+min_val <- min(c(plot_data_europe$observed, plot_data_europe$predicted), na.rm = TRUE)
+max_val <- max(c(plot_data_europe$observed, plot_data_europe$predicted), na.rm = TRUE)
+range_ext <- (max_val - min_val) * 0.3
+plot_min <- min_val - range_ext
+plot_max <- max_val + range_ext
+  
+
+
+plot_latam<- ggplot(plot_data_latam, aes(x = observed, y = predicted)) +
+    geom_point(alpha = 0.5, size = 0.6) +
+    geom_segment(x =  plot_min, y = plot_min, xend = plot_max, yend = plot_max, linetype = "dashed", color = "gray40") +
+    geom_smooth(method = "lm", se = FALSE, color = "firebrick3", linewidth = 0.8) +
+    coord_fixed(ratio = 1, xlim = c(plot_min, plot_max), ylim = c(plot_min, plot_max)) +
+    labs(x = "Potential Tree cover (%)", y = expression(italic(fx) ~ "TWA-PLS2  tree cover (%)"), subtitle = "LATAM") +
+    theme_bw() +
+    annotate("text", 
+             x = plot_min + 0.03*(plot_max - plot_min), 
+             y = plot_max - 0.03*(plot_max - plot_min), 
+             label = metrics_text,
+             hjust = 0, vjust = 1,
+             size = 2.6, family = "sans")
+
+plot_latam
+```
+
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/Potential tree cover/performance_bin1.5.JPG", plot = plot_latam,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+
+```{r}
+plot_data_europe <- cv_targets_europe[["Tree_Gaussian_50_sigma2"]] |>
+  as_tibble() |>
+  transmute(region = "Europe",
+    target = "Tree_Gaussian_50_sigma2",
+    component = 2L,
+    id_sample = europe_twapls_data[["Tree_Median_50_sigma2"]]$ids,
+    observed = test.x,
+    predicted = comp2) |>
+  left_join(select(europe_extraction, id_sample, latitude, longitude, elevation),
+            by = "id_sample")
+
+
+
+aux_metrics <- rand_table_europe |>
+  filter(target == "Tree_Gaussian_50_sigma2" & n_comp == 2) |>
+  mutate(
+    R2 = round(R2, 2),
+    RMSEP = round(RMSEP, 2),
+    Compre.b1 = round(Compre.b1, 2)
+  )
+
+  # Texto para las métricas
+ metrics_text <- paste0(paste0("R² = ", aux_metrics$R2, "\n"),
+                         paste0("RMSEP = ", aux_metrics$RMSEP, "\n"),
+                         paste0("b1 = ", aux_metrics$Compre.b1))
+  
+
+
+# Calcular rangos extendidos (15% más allá de los datos)
+min_val <- min(c(plot_data_europe$observed, plot_data_europe$predicted), na.rm = TRUE)
+max_val <- max(c(plot_data_europe$observed, plot_data_europe$predicted), na.rm = TRUE)
+range_ext <- (max_val - min_val) * 0.08
+plot_min <- min_val - range_ext
+plot_max <- max_val + range_ext
+  
+
+
+plot_europe <- ggplot(plot_data_europe, aes(x = observed, y = predicted)) +
+    geom_point(alpha = 0.3, size = 0.6) +
+    geom_segment(x =  plot_min, y = plot_min, xend = plot_max, yend = plot_max, linetype = "dashed", color = "gray40") +
+    geom_smooth(method = "lm", se = FALSE, color = "firebrick3", linewidth = 0.8) +
+    coord_fixed(ratio = 1, xlim = c(plot_min, plot_max), ylim = c(plot_min, plot_max)) +
+    labs(x = "Potential Tree cover (%)", y = expression(italic(fx) ~ "TWA-PLS2  tree cover (%)"), subtitle = "EUROPE") +
+    theme_bw() +
+    annotate("text", 
+             x = plot_min + 0.03*(plot_max - plot_min), 
+             y = plot_max - 0.03*(plot_max - plot_min), 
+             label = metrics_text,
+             hjust = 0, vjust = 1,
+             size = 2.6, family = "sans")
+  
+plot_europe
+```
+
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/Potential tree cover/performance_bin0.2.JPG", plot = plot_europe,
+       width = 4, height = 4, units = "in", dpi = 300)
+```
+
+
+```{r}
+plot_diagnostic <- plot_data_final |>
+  filter(region == "Europe") |>
+  mutate(
+    residual = predicted - observed,
+    observed_class = cut(
+      observed,
+      breaks = c(-Inf, 20, 40, 60, 80, Inf),
+      labels = c(
+        "0–20",
+        "20–40",
+        "40–60",
+        "60–80",
+        "80–100"
+      )
+    )
+  ) |>
+  group_by(observed_class) |>
+  summarise(
+    n = n(),
+    mean_observed = mean(observed),
+    mean_predicted = mean(predicted),
+    mean_residual = mean(residual),
+    RMSEP = sqrt(mean(residual^2)),
+    .groups = "drop"
+  )
+
+plot_diagnostic
+```
+
+
+```{r}
+plot_data_europe_map <- plot_data_europe |> pivot_longer(cols = c(observed, predicted), names_to = "type", values_to = "value")
+
+
+plot_europe_map <- ggplot() +
+  geom_sf(data = land_polyg_eur) +
+  geom_point(data = plot_data_europe_map, aes(x=longitude, y=latitude, colour = value), size=0.6) +
+  facet_wrap(~type) +
+  rcartocolor::scale_colour_carto_c(palette = "Temps",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, color = "tree\ncover\n(%)") +
+  theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.28,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=7.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 7.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.05,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.54,0.25))
+
+plot_europe_map
+```
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/EUROPE/Potential tree cover/performance_map_bin0.2.JPG", plot = plot_europe_map,
+       width = 8, height = 4, units = "in", dpi = 300)
+```
+
+
+
+
+
+```{r}
+plot_data_latam_map <- plot_data_latam |> pivot_longer(cols = c(observed, predicted), names_to = "type", values_to = "value")
+
+
+plot_latam_map <- ggplot() +
+  geom_sf(data = land_polyg_latam) +
+  geom_point(data = plot_data_latam_map, aes(x=longitude, y=latitude, colour = value), size=0.7) +
+  facet_wrap(~type) +
+  rcartocolor::scale_colour_carto_c(palette = "Temps",direction = -1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x=NULL, y=NULL, color = "tree\ncover\n(%)") +
+  theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.28,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=7.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 7.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.05,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.54,0.25))
+
+plot_latam_map
+```
+
+```{r}
+ggsave("C:/Research/Tree_cover_LATAM_EMBSECBIO/Figures/LATAM/Potential tree cover/performance_map_bin0.2.JPG", plot = plot_latam_map,
+       width = 8, height = 4, units = "in", dpi = 300)
+```
+
+
+
+
